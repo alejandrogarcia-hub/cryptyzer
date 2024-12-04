@@ -97,7 +97,7 @@ class GitHubAnalyzer:
     def __init__(self, github_token: str = None):
         self.github = Github(github_token or settings.github_token)
 
-    def _check_rate_limit(self) -> None:
+    def _check_rate_limit(self, check_name: str = None) -> None:
         """
         Check GitHub API rate limit status.
         Logs warning when approaching limit and critical when limit is reached.
@@ -110,7 +110,7 @@ class GitHubAnalyzer:
         # Log current rate limit status
         logger.info(
             {
-                "message": "GitHub API rate limit status",
+                "message": f"{check_name} API rate limit status",
                 "remaining_points": remaining,
                 "total_points": rate_limit.limit,
                 "reset_time": reset_time.isoformat(),
@@ -298,7 +298,7 @@ class GitHubAnalyzer:
 
     async def analyze_repository(self, repo_name: str) -> RepositoryMetrics:
         try:
-            self._check_rate_limit()
+            self._check_rate_limit(check_name="current value")
             logger.info(
                 {"message": "Starting repository analysis", "repository": repo_name}
             )
@@ -306,11 +306,11 @@ class GitHubAnalyzer:
             repo = self.github.get_repo(repo_name)
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=60)
 
-            self._check_rate_limit()
+            self._check_rate_limit(check_name="get_repository")
 
             # Get open PRs first (including drafts)
             open_prs = repo.get_pulls(state="open", sort="updated", direction="desc")
-            self._check_rate_limit()
+            self._check_rate_limit(check_name="get_open_prs")
 
             # Track active branches through PRs
             active_branch_names = set()
@@ -322,7 +322,7 @@ class GitHubAnalyzer:
                 active_branch_names.add(pr.head.ref)
                 recent_open_prs.append(pr)
 
-            self._check_rate_limit()
+            self._check_rate_limit(check_name="get_merged_prs")
 
             # Get merged PRs within cutoff
             merged_prs = [
@@ -339,14 +339,14 @@ class GitHubAnalyzer:
             merged_prs_count = len(merged_prs)
             active_branches_count = len(active_branch_names)
 
-            self._check_rate_limit()
+            self._check_rate_limit(check_name="get_recent_issues")
 
             # Get recent issues
             recent_issues = repo.get_issues(
                 state="all", sort="updated", direction="desc"
             )
 
-            self._check_rate_limit()
+            self._check_rate_limit(check_name="get_recent_issues")
 
             total_issues = 0
             open_issues = 0
@@ -450,11 +450,7 @@ class GitHubAnalyzer:
             )
 
             logger.info(
-                {
-                    "message": "Repository analysis completed",
-                    "repository": repo_name,
-                    "metrics": metrics.to_dict(),
-                }
+                {"message": "Repository analysis completed", "repository": repo_name}
             )
 
             return metrics

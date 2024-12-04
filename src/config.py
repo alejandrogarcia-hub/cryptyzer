@@ -1,5 +1,6 @@
-from pydantic import Field, SecretStr, field_validator, AnyHttpUrl
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List
 import os
 from logger import LogManager
 
@@ -13,8 +14,8 @@ class Settings(BaseSettings):
 
     # GitHub configuration
     github_token: SecretStr = Field(..., description="GitHub token")
-    github_repo_url: AnyHttpUrl = Field(
-        ..., description="GitHub repository URL to analyze"
+    github_repo_urls: str = Field(
+        ..., description="Comma-separated GitHub repository URLs to analyze"
     )
 
     # Optional configuration with defaults
@@ -23,16 +24,10 @@ class Settings(BaseSettings):
         default="reports", description="Report output directory"
     )
 
-    @field_validator("github_repo_url")
-    def extract_repo_name(cls, v):
-        """Extract repository name from URL."""
-        # Remove .git extension if present
-        url = str(v).rstrip(".git")
-        # Extract owner/repo from URL
-        parts = url.split("/")
-        if len(parts) < 2:
-            raise ValueError("Invalid GitHub repository URL")
-        return f"{parts[-2]}/{parts[-1]}"
+    @property
+    def repository_urls(self) -> List[str]:
+        """Get list of repository URLs."""
+        return [url.strip() for url in self.github_repo_urls.split(",")]
 
     @field_validator("report_output_dir")
     def ensure_absolute_path(cls, v):

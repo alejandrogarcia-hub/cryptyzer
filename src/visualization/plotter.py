@@ -6,8 +6,10 @@ import seaborn as sns
 from datetime import datetime
 import pandas as pd
 import os
+import numpy as np
 
 from storage.repository_store import StoredAnalysis
+from analyzers.repository import RepositoryMetrics
 from config import logger
 
 
@@ -271,3 +273,128 @@ class RepositoryPlotter:
                 )
 
         return saved_plots
+
+    def create_comparison_plots(
+        self, results: Dict[str, RepositoryMetrics]
+    ) -> List[str]:
+        """Create comparison plots for multiple repositories."""
+        if not results:
+            return []
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        saved_plots = []
+
+        try:
+            # PR Status Comparison
+            fig, ax = plt.subplots(figsize=(12, 6))
+            repos = list(results.keys())
+            x = range(len(repos))
+            width = 0.35
+
+            open_prs = [metrics.open_prs for metrics in results.values()]
+            merged_prs = [metrics.merged_prs for metrics in results.values()]
+
+            ax.bar([i - width / 2 for i in x], open_prs, width, label="Open PRs")
+            ax.bar([i + width / 2 for i in x], merged_prs, width, label="Merged PRs")
+
+            ax.set_title("Pull Request Status Comparison")
+            ax.set_xlabel("Repository")
+            ax.set_ylabel("Count")
+            ax.set_xticks(x)
+            ax.set_xticklabels(repos, rotation=45, ha="right")
+            ax.legend()
+            plt.tight_layout()
+
+            # Save PR comparison plot
+            pr_plot_path = os.path.join(
+                self.output_dir, f"pr_comparison_{timestamp}.png"
+            )
+            fig.savefig(pr_plot_path)
+            plt.close(fig)
+            saved_plots.append(pr_plot_path)
+
+            # Issue Status Comparison
+            fig, ax = plt.subplots(figsize=(12, 6))
+            open_issues = [metrics.open_issues for metrics in results.values()]
+            total_issues = [metrics.total_issues for metrics in results.values()]
+
+            ax.bar([i - width / 2 for i in x], open_issues, width, label="Open Issues")
+            ax.bar(
+                [i + width / 2 for i in x], total_issues, width, label="Total Issues"
+            )
+
+            ax.set_title("Issue Status Comparison")
+            ax.set_xlabel("Repository")
+            ax.set_ylabel("Count")
+            ax.set_xticks(x)
+            ax.set_xticklabels(repos, rotation=45, ha="right")
+            ax.legend()
+            plt.tight_layout()
+
+            # Save issue comparison plot
+            issue_plot_path = os.path.join(
+                self.output_dir, f"issue_comparison_{timestamp}.png"
+            )
+            fig.savefig(issue_plot_path)
+            plt.close(fig)
+            saved_plots.append(issue_plot_path)
+
+            # PR Types Distribution
+            fig, ax = plt.subplots(figsize=(12, 6))
+            pr_types = set()
+            for metrics in results.values():
+                pr_types.update(pt.type.value for pt in metrics.pr_types)
+
+            pr_types = sorted(pr_types)
+            bar_positions = np.arange(len(repos))
+            bar_width = 0.15
+
+            for i, pr_type in enumerate(pr_types):
+                counts = []
+                for metrics in results.values():
+                    type_metrics = next(
+                        (pt for pt in metrics.pr_types if pt.type.value == pr_type),
+                        None,
+                    )
+                    counts.append(type_metrics.total_count if type_metrics else 0)
+
+                ax.bar(
+                    bar_positions + i * bar_width,
+                    counts,
+                    bar_width,
+                    label=pr_type.title(),
+                )
+
+            ax.set_title("Pull Request Types Distribution")
+            ax.set_xlabel("Repository")
+            ax.set_ylabel("Count")
+            ax.set_xticks(bar_positions + bar_width * (len(pr_types) - 1) / 2)
+            ax.set_xticklabels(repos, rotation=45, ha="right")
+            ax.legend()
+            plt.tight_layout()
+
+            # Save PR types plot
+            pr_types_plot_path = os.path.join(
+                self.output_dir, f"pr_types_comparison_{timestamp}.png"
+            )
+            fig.savefig(pr_types_plot_path)
+            plt.close(fig)
+            saved_plots.append(pr_types_plot_path)
+
+            return saved_plots
+
+        except Exception as e:
+            logger.error(
+                {"message": "Failed to create comparison plots", "error": str(e)}
+            )
+            # Clean up any partially created plots
+            for plot_path in saved_plots:
+                try:
+                    if os.path.exists(plot_path):
+                        os.remove(plot_path)
+                except Exception:
+                    pass
+            raise
+        finally:
+            # Ensure all plots are closed
+            plt.close("all")

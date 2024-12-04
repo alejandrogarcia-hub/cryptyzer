@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -213,6 +213,95 @@ class PDFReportGenerator:
             logger.error(
                 {
                     "message": "PDF report generation failed",
+                    "error": str(e),
+                    "output_path": output_path,
+                }
+            )
+            raise
+
+    def generate_summary_report(
+        self, results: Dict[str, RepositoryMetrics], output_path: str
+    ) -> None:
+        """Generate a summary report comparing all repositories."""
+        try:
+            logger.info(
+                {
+                    "message": "Starting summary report generation",
+                    "repositories": list(results.keys()),
+                    "output_path": output_path,
+                }
+            )
+
+            doc = SimpleDocTemplate(output_path, pagesize=letter)
+            elements = []
+
+            # Add title
+            elements.extend(
+                [
+                    Paragraph(
+                        "GitHub Repositories Analysis Summary", self.styles["Heading1"]
+                    ),
+                    Spacer(1, 20),
+                ]
+            )
+
+            # Create comparison table
+            data = [["Metric"] + list(results.keys())]
+            metrics_to_compare = [
+                ("Total PRs", "total_prs"),
+                ("Open PRs", "open_prs"),
+                ("Merged PRs", "merged_prs"),
+                ("Active Branches", "active_branches"),
+                ("Total Issues", "total_issues"),
+                ("Open Issues", "open_issues"),
+            ]
+
+            for metric_name, metric_attr in metrics_to_compare:
+                row = [metric_name]
+                for metrics in results.values():
+                    row.append(getattr(metrics, metric_attr))
+                data.append(row)
+
+            table = Table(data)
+            table.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
+                        ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                    ]
+                )
+            )
+            elements.append(table)
+
+            # Add comparison plots
+            elements.extend(
+                [
+                    Spacer(1, 30),
+                    Paragraph("Repository Comparisons", self.styles["Heading1"]),
+                    Spacer(1, 20),
+                ]
+            )
+
+            # Generate and add comparison plots
+            plot_paths = self.plotter.create_comparison_plots(results)
+            self._add_plots(elements, plot_paths)
+
+            doc.build(elements)
+            logger.info(
+                {
+                    "message": "Summary report generated successfully",
+                    "output_path": output_path,
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                {
+                    "message": "Summary report generation failed",
                     "error": str(e),
                     "output_path": output_path,
                 }
