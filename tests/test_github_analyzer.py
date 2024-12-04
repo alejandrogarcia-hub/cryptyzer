@@ -37,7 +37,7 @@ async def test_analyze_repository_success(analyzer, mock_github):
     """Test successful repository analysis."""
     # Mock repository data
     mock_repo = Mock()
-    
+
     # Mock pull requests
     mock_pr = Mock()
     mock_pr.title = "feat: new feature"
@@ -47,21 +47,21 @@ async def test_analyze_repository_success(analyzer, mock_github):
     mock_pr.created_at = datetime.now(timezone.utc)
     mock_pr.merged_at = None
     mock_pr.head.ref = "feature/new-feature"
-    
+
     mock_repo.get_pulls.return_value = [mock_pr]
-    
+
     # Mock branches
     mock_branch = Mock()
     mock_branch.name = "feature/test"
     mock_branch.commit.commit.author.date = datetime.now(timezone.utc)
     mock_repo.get_branches.return_value = [mock_branch]
-    
+
     # Mock issues
     mock_issue = Mock()
     mock_issue.updated_at = datetime.now(timezone.utc)
     mock_issue.state = "open"
     mock_repo.get_issues.return_value = [mock_issue]
-    
+
     mock_github.return_value.get_repo.return_value = mock_repo
 
     # Run analysis
