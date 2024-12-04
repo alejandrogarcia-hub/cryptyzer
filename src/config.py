@@ -1,4 +1,4 @@
-from pydantic import Field, SecretStr, validator, AnyHttpUrl
+from pydantic import Field, SecretStr, field_validator, AnyHttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import os
 from logger import LogManager
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
         default="reports", description="Report output directory"
     )
 
-    @validator("github_repo_url")
+    @field_validator("github_repo_url")
     def extract_repo_name(cls, v):
         """Extract repository name from URL."""
         # Remove .git extension if present
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
             raise ValueError("Invalid GitHub repository URL")
         return f"{parts[-2]}/{parts[-1]}"
 
-    @validator("report_output_dir")
+    @field_validator("report_output_dir")
     def ensure_absolute_path(cls, v):
         """Ensure report output directory is an absolute path."""
         if not os.path.isabs(v):
