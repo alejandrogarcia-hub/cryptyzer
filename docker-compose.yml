@@ -1,0 +1,45 @@
+services:
+  # Base service (not directly runnable)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ENVIRONMENT: production
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./plots:/app/plots
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    profiles: ["never"]
+
+  # Development configuration
+  dev:
+    extends: app
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ENVIRONMENT: development
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./plots:/app/plots
+      - ./logs:/app/logs
+    environment:
+      - ENVIRONMENT=development
+    command: python -m src.app --debug
+    profiles:
+      - dev
+
+  # Production configuration
+  prod:
+    extends: app
+    environment:
+      - ENVIRONMENT=production
+    restart: unless-stopped
+    profiles:
+      - prod 

@@ -1,0 +1,24 @@
+# dot files
+.*
+!.env.test
+!.version
+.editorconfig
+.gitignore
+.git
+
+# other
+Makefile
+README.md
+NOTES.md
+docker-compose.yml
+setup.cfg
+*.gocd.yaml
+
+# generated
+*.py[cod]
+*_cache
+__pycache__
+*.lock
+*.egg-info
+*.egg
+*.toml
