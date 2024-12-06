@@ -1,4 +1,17 @@
-"""Module for creating analysis visualizations."""
+"""
+Repository Analysis Visualization Module.
+
+Provides functionality for creating and managing data visualizations of repository
+analysis results, including:
+- Time series analysis
+- Metric distributions
+- Comparative analysis
+- Historical trends
+- Activity patterns
+
+The module uses matplotlib and seaborn for creating publication-quality visualizations
+and handles proper file management for generated plots.
+"""
 
 from typing import Dict, List, Any, Optional
 import matplotlib.pyplot as plt
@@ -14,21 +27,35 @@ from config import logger
 
 
 class AnalysisPlotter:
-    """Class for creating visualizations of repository analysis results."""
+    """
+    Base plotter class for creating analysis visualizations.
+
+    Provides foundational plotting capabilities with consistent styling
+    and formatting across all visualizations.
+
+    Attributes:
+        None
+    """
 
     def __init__(self):
-        """Initialize the plotter with default style settings."""
+        """
+        Initialize plotter with consistent visual styling.
+
+        Sets up seaborn whitegrid style and default figure dimensions
+        for consistent visualization appearance.
+        """
         sns.set_style("whitegrid")
         plt.rcParams["figure.figsize"] = (12, 6)
 
     def _parse_timestamp(self, timestamp: str) -> datetime:
-        """Parse ISO format timestamp string.
+        """
+        Convert ISO timestamp string to datetime object.
 
         Args:
-            timestamp: ISO format timestamp string
+            timestamp (str): ISO format timestamp string
 
         Returns:
-            datetime object
+            datetime: Parsed datetime object
         """
         return datetime.fromisoformat(timestamp)
 
@@ -38,15 +65,19 @@ class AnalysisPlotter:
         metric_name: str,
         title: Optional[str] = None,
     ) -> plt.Figure:
-        """Create a time series plot for a specific metric.
+        """
+        Generate time series visualization for a metric.
+
+        Creates a line plot showing the evolution of a specific metric
+        over time with proper formatting and annotations.
 
         Args:
-            history: List of historical analysis results
-            metric_name: Name of the metric to plot
-            title: Optional plot title
+            history (List[Dict[str, Any]]): Historical analysis data points
+            metric_name (str): Name of the metric to visualize
+            title (Optional[str]): Custom plot title
 
         Returns:
-            matplotlib Figure object
+            plt.Figure: Generated matplotlib figure object
         """
         # Extract timestamps and metric values
         timestamps = [self._parse_timestamp(item["timestamp"]) for item in history]
@@ -76,15 +107,19 @@ class AnalysisPlotter:
         metrics: List[str],
         title: Optional[str] = None,
     ) -> plt.Figure:
-        """Create a plot comparing multiple metrics over time.
+        """
+        Create comparative visualization of multiple metrics.
+
+        Generates a multi-line plot comparing different metrics
+        over time on the same axes.
 
         Args:
-            history: List of historical analysis results
-            metrics: List of metric names to compare
-            title: Optional plot title
+            history (List[Dict[str, Any]]): Historical analysis data
+            metrics (List[str]): List of metrics to compare
+            title (Optional[str]): Custom plot title
 
         Returns:
-            matplotlib Figure object
+            plt.Figure: Generated matplotlib figure object
         """
         timestamps = [self._parse_timestamp(item["timestamp"]) for item in history]
 
@@ -119,15 +154,19 @@ class AnalysisPlotter:
         metric_name: str,
         title: Optional[str] = None,
     ) -> plt.Figure:
-        """Create a distribution plot for a metric's values over time.
+        """
+        Generate distribution plot for metric values.
+
+        Creates a histogram with kernel density estimation to show
+        the distribution of values for a specific metric.
 
         Args:
-            history: List of historical analysis results
-            metric_name: Name of the metric to analyze
-            title: Optional plot title
+            history (List[Dict[str, Any]]): Historical analysis data
+            metric_name (str): Name of the metric to analyze
+            title (Optional[str]): Custom plot title
 
         Returns:
-            matplotlib Figure object
+            plt.Figure: Generated matplotlib figure object
         """
         values = [item["data"].get(metric_name, 0) for item in history]
 
@@ -147,13 +186,40 @@ class AnalysisPlotter:
 
 
 class RepositoryPlotter:
+    """
+    Specialized plotter for repository-specific visualizations.
+
+    Handles creation and management of repository analysis visualizations,
+    including file management and multi-repository comparisons.
+
+    Attributes:
+        output_dir (str): Directory for saving generated plots
+    """
+
     def __init__(self, output_dir: str = "plots"):
-        """Initialize repository plotter."""
+        """
+        Initialize repository plotter with output configuration.
+
+        Args:
+            output_dir (str): Directory path for saving generated plots.
+                Defaults to "plots"
+        """
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
     def create_pr_trend_plot(self, history: List[StoredAnalysis]) -> plt.Figure:
-        """Create pull request trend plot."""
+        """
+        Create pull request trend visualization.
+
+        Generates a line plot showing the trends of open and merged
+        pull requests over time.
+
+        Args:
+            history (List[StoredAnalysis]): Historical analysis data
+
+        Returns:
+            plt.Figure: Generated trend plot figure
+        """
         dates = [h.analysis_date for h in history]
         open_prs = [h.metrics["open_prs"] for h in history]
         merged_prs = [h.metrics["merged_prs"] for h in history]
@@ -177,7 +243,18 @@ class RepositoryPlotter:
     def create_pr_type_distribution_plot(
         self, history: List[StoredAnalysis]
     ) -> plt.Figure:
-        """Create PR type distribution plot."""
+        """
+        Create pull request type distribution visualization.
+
+        Generates a bar plot showing the distribution of different
+        PR types (open vs. merged) in the latest analysis.
+
+        Args:
+            history (List[StoredAnalysis]): Historical analysis data
+
+        Returns:
+            plt.Figure: Generated distribution plot figure
+        """
         latest = history[0]  # Most recent analysis
         pr_types = latest.metrics["pr_types"]
 
@@ -203,7 +280,18 @@ class RepositoryPlotter:
         return fig
 
     def create_branch_activity_plot(self, history: List[StoredAnalysis]) -> plt.Figure:
-        """Create branch activity plot."""
+        """
+        Create branch activity visualization.
+
+        Generates a dual-panel plot showing branch activity patterns
+        for both 7-day and 30-day periods.
+
+        Args:
+            history (List[StoredAnalysis]): Historical analysis data
+
+        Returns:
+            plt.Figure: Generated activity plot figure
+        """
         latest = history[0]  # Most recent analysis
         branch_activity = latest.metrics["branch_activity"]
 
@@ -241,7 +329,21 @@ class RepositoryPlotter:
         return fig
 
     def save_plots(self, history: List[StoredAnalysis]) -> List[str]:
-        """Generate and save all plots for a repository."""
+        """
+        Generate and save all repository analysis plots.
+
+        Creates a complete set of visualizations for a repository
+        and saves them to the configured output directory.
+
+        Args:
+            history (List[StoredAnalysis]): Historical analysis data
+
+        Returns:
+            List[str]: Paths to all generated plot files
+
+        Raises:
+            Exception: If plot generation or saving fails
+        """
         if not history:
             return []
 
@@ -277,7 +379,27 @@ class RepositoryPlotter:
     def create_comparison_plots(
         self, results: Dict[str, RepositoryMetrics]
     ) -> List[str]:
-        """Create comparison plots for multiple repositories."""
+        """
+        Create comparative visualizations across repositories.
+
+        Generates a set of plots comparing metrics across multiple
+        repositories, including:
+        - PR status comparison
+        - Issue status comparison
+        - PR types distribution
+
+        Args:
+            results (Dict[str, RepositoryMetrics]): Analysis results by repository
+
+        Returns:
+            List[str]: Paths to generated comparison plot files
+
+        Raises:
+            Exception: If plot generation or saving fails
+
+        Note:
+            Automatically cleans up partial results if generation fails
+        """
         if not results:
             return []
 

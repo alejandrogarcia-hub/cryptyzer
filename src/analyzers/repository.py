@@ -1,3 +1,16 @@
+"""
+GitHub Repository Analysis Module.
+
+Provides comprehensive analysis of GitHub repositories including metrics for:
+- Pull request activity and categorization
+- Branch activity patterns
+- Issue tracking and management
+- Repository health indicators
+
+The module handles GitHub API rate limiting and provides detailed logging
+of all analysis operations.
+"""
+
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -11,6 +24,18 @@ from config import settings, logger
 
 
 class BranchType(Enum):
+    """
+    Classification of repository branch types.
+
+    Attributes:
+        FEATURE: Feature development branches
+        BUGFIX: Bug fix branches
+        HOTFIX: Critical/urgent fix branches
+        REFACTOR: Code refactoring branches
+        TEST: Testing branches
+        OTHER: Uncategorized branches
+    """
+
     FEATURE = "feature"
     BUGFIX = "bugfix"
     HOTFIX = "hotfix"
@@ -20,6 +45,19 @@ class BranchType(Enum):
 
 
 class PullRequestType(Enum):
+    """
+    Classification of pull request types.
+
+    Attributes:
+        FEATURE: New feature implementations
+        BUGFIX: Bug fixes
+        HOTFIX: Critical/urgent fixes
+        REFACTOR: Code refactoring
+        TEST: Testing changes
+        ISSUE: Issue-related changes
+        OTHER: Uncategorized changes
+    """
+
     FEATURE = "feature"
     BUGFIX = "bugfix"
     HOTFIX = "hotfix"
@@ -31,6 +69,15 @@ class PullRequestType(Enum):
 
 @dataclass
 class TimeframeMetrics:
+    """
+    Metrics collected over different time periods.
+
+    Attributes:
+        last_7_days (int): Activity count in the last 7 days
+        last_30_days (int): Activity count in the last 30 days
+        last_60_days (int): Activity count in the last 60 days
+    """
+
     last_7_days: int
     last_30_days: int
     last_60_days: int
@@ -38,6 +85,15 @@ class TimeframeMetrics:
 
 @dataclass
 class BranchActivityMetrics:
+    """
+    Branch activity metrics for a specific branch type.
+
+    Attributes:
+        type (BranchType): Branch classification type
+        opened (TimeframeMetrics): Metrics for newly opened branches
+        closed (TimeframeMetrics): Metrics for closed/merged branches
+    """
+
     type: BranchType
     opened: TimeframeMetrics
     closed: TimeframeMetrics
@@ -45,6 +101,16 @@ class BranchActivityMetrics:
 
 @dataclass
 class PRTypeMetrics:
+    """
+    Pull request metrics for a specific PR type.
+
+    Attributes:
+        type (PullRequestType): Pull request classification type
+        open_count (int): Number of open PRs
+        merged_count (int): Number of merged PRs
+        total_count (int): Total number of PRs
+    """
+
     type: PullRequestType
     open_count: int
     merged_count: int
@@ -53,6 +119,22 @@ class PRTypeMetrics:
 
 @dataclass
 class RepositoryMetrics:
+    """
+    Comprehensive repository metrics and analysis results.
+
+    Attributes:
+        total_prs (int): Total number of pull requests
+        open_prs (int): Number of open pull requests
+        merged_prs (int): Number of merged pull requests
+        active_branches (int): Number of active branches
+        total_issues (int): Total number of issues
+        open_issues (int): Number of open issues
+        repository_name (str): Name of the analyzed repository
+        analysis_date (datetime): Timestamp of the analysis
+        pr_types (List[PRTypeMetrics]): Breakdown of PR types and their metrics
+        branch_activity (List[BranchActivityMetrics]): Branch activity metrics by type
+    """
+
     total_prs: int
     open_prs: int
     merged_prs: int
@@ -65,7 +147,13 @@ class RepositoryMetrics:
     branch_activity: List[BranchActivityMetrics]
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert metrics to dictionary with serializable values."""
+        """
+        Convert metrics to a dictionary with serializable values.
+
+        Returns:
+            Dict[str, Any]: Dictionary containing serialized metrics data
+                with ISO-formatted dates and enum values converted to strings.
+        """
         data = asdict(self)
         data["analysis_date"] = self.analysis_date.isoformat()
 
@@ -94,13 +182,36 @@ class RepositoryMetrics:
 
 
 class GitHubAnalyzer:
+    """
+    GitHub repository analyzer with rate limiting and error handling.
+
+    This class provides methods for analyzing GitHub repositories,
+    including PR analysis, branch activity tracking, and issue metrics.
+    It handles GitHub API rate limiting and provides detailed logging.
+
+    Attributes:
+        github (Github): Authenticated GitHub API client instance
+    """
+
     def __init__(self, github_token: str = None):
+        """
+        Initialize the GitHub analyzer.
+
+        Args:
+            github_token (str, optional): GitHub API token. If not provided,
+                uses token from settings.
+        """
         self.github = Github(github_token or settings.github_token)
 
     def _check_rate_limit(self, check_name: str = None) -> None:
         """
-        Check GitHub API rate limit status.
-        Logs warning when approaching limit and critical when limit is reached.
+        Check GitHub API rate limit status and handle limits.
+
+        Args:
+            check_name (str, optional): Name of the check point for logging.
+
+        Raises:
+            Exception: When rate limit is exhausted, with time until reset.
         """
         rate_limit: RateLimit = self.github.get_rate_limit().core
         remaining = rate_limit.remaining
@@ -143,6 +254,15 @@ class GitHubAnalyzer:
             )
 
     def _categorize_branch_type(self, branch_name: str) -> BranchType:
+        """
+        Determine branch type based on its name.
+
+        Args:
+            branch_name (str): Name of the branch to categorize.
+
+        Returns:
+            BranchType: Classified branch type based on naming patterns.
+        """
         name_lower = branch_name.lower()
         if any(keyword in name_lower for keyword in ["feature", "feat"]):
             return BranchType.FEATURE
@@ -159,7 +279,15 @@ class GitHubAnalyzer:
         return BranchType.OTHER
 
     def _analyze_branch_activity(self, repo) -> List[BranchActivityMetrics]:
-        """Analyze branch activity for the last 60 days."""
+        """
+        Analyze branch activity for the last 60 days.
+
+        Args:
+            repo (github.Repository.Repository): GitHub repository object.
+
+        Returns:
+            List[BranchActivityMetrics]: Branch activity metrics by branch type.
+        """
         now = datetime.now(timezone.utc)
         cutoff_date = now - timedelta(days=60)
 
@@ -227,7 +355,17 @@ class GitHubAnalyzer:
     def _categorize_pr_type(
         self, title: str, body: str, labels: List[str]
     ) -> PullRequestType:
-        """Categorize PR type based on title, body and labels."""
+        """
+        Categorize pull request type based on metadata.
+
+        Args:
+            title (str): PR title
+            body (str): PR description
+            labels (List[str]): PR labels
+
+        Returns:
+            PullRequestType: Classified pull request type based on content and labels.
+        """
         title_lower = title.lower()
         combined_text = f"{title_lower} {body.lower() if body else ''}"
         labels_lower = [label.lower() for label in labels]
@@ -269,7 +407,15 @@ class GitHubAnalyzer:
         return PullRequestType.OTHER
 
     def _analyze_pr_types(self, repo) -> List[PRTypeMetrics]:
-        """Analyze types of pull requests from the last 60 days."""
+        """
+        Analyze types of pull requests from the last 60 days.
+
+        Args:
+            repo (github.Repository.Repository): GitHub repository object.
+
+        Returns:
+            List[PRTypeMetrics]: PR metrics categorized by type.
+        """
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=60)
 
         # Get only recent PRs
@@ -297,6 +443,24 @@ class GitHubAnalyzer:
         ]
 
     async def analyze_repository(self, repo_name: str) -> RepositoryMetrics:
+        """
+        Perform comprehensive analysis of a GitHub repository.
+
+        Analyzes repository metrics including:
+        - Pull request statistics and categorization
+        - Branch activity patterns
+        - Issue tracking metrics
+        - Overall repository health indicators
+
+        Args:
+            repo_name (str): Full name of the repository (owner/repo)
+
+        Returns:
+            RepositoryMetrics: Comprehensive analysis results
+
+        Raises:
+            Exception: If analysis fails or rate limit is exceeded
+        """
         try:
             self._check_rate_limit(check_name="current value")
             logger.info(

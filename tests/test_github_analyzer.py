@@ -1,3 +1,16 @@
+"""
+GitHub Analyzer Test Suite.
+
+This module contains tests for the GitHubAnalyzer class, covering:
+- Repository analysis functionality
+- Rate limit handling
+- Error scenarios
+- Mock GitHub API interactions
+
+The tests use pytest fixtures for dependency injection and
+mock objects to simulate GitHub API responses.
+"""
+
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timezone
@@ -6,7 +19,16 @@ from analyzers.repository import GitHubAnalyzer, RepositoryMetrics
 
 @pytest.fixture(autouse=True)
 def mock_settings():
-    """Mock settings for testing."""
+    """
+    Mock application settings for testing.
+
+    Provides a mock settings object with predefined values for:
+    - GitHub token
+    - Log level
+
+    Yields:
+        MagicMock: Mocked settings object with test configuration
+    """
     with patch("analyzers.repository.settings") as mock_settings:
         mock_settings.github_token = "dummy_token"
         mock_settings.log_level = "INFO"
@@ -15,9 +37,23 @@ def mock_settings():
 
 @pytest.fixture
 def mock_github():
-    """Mock GitHub API."""
+    """
+    Mock GitHub API client.
+
+    Provides a mock GitHub client with preconfigured rate limits and
+    simulated API responses.
+
+    Yields:
+        MagicMock: Mocked GitHub client with test configuration
+
+    Note:
+        Includes mock rate limit configuration with:
+        - 1000 remaining calls
+        - 5000 total limit
+        - Current time as reset time
+    """
     with patch("analyzers.repository.Github") as mock:
-        # Mock rate limit
+        # Mock rate limit configuration
         rate_limit = MagicMock()
         rate_limit.core.remaining = 1000
         rate_limit.core.limit = 5000
@@ -28,17 +64,45 @@ def mock_github():
 
 @pytest.fixture
 def analyzer(mock_github):
-    """Create analyzer instance with mocked dependencies."""
+    """
+    Create GitHubAnalyzer instance for testing.
+
+    Args:
+        mock_github: Mocked GitHub client fixture
+
+    Returns:
+        GitHubAnalyzer: Analyzer instance with mocked dependencies
+    """
     return GitHubAnalyzer()
 
 
 @pytest.mark.asyncio
 async def test_analyze_repository_success(analyzer, mock_github):
-    """Test successful repository analysis."""
+    """
+    Test successful repository analysis scenario.
+
+    Verifies that the analyzer correctly:
+    - Processes repository data
+    - Handles pull requests
+    - Analyzes branches
+    - Tracks issues
+    - Generates metrics
+
+    Args:
+        analyzer: GitHubAnalyzer instance
+        mock_github: Mocked GitHub client
+
+    Assertions:
+        - Returns valid RepositoryMetrics instance
+        - Contains expected repository name
+        - Has valid counts for PRs, branches, and issues
+        - Includes PR type analysis
+        - Includes branch activity metrics
+    """
     # Mock repository data
     mock_repo = Mock()
 
-    # Mock pull requests
+    # Mock pull request data
     mock_pr = Mock()
     mock_pr.title = "feat: new feature"
     mock_pr.body = "Feature description"
@@ -50,13 +114,13 @@ async def test_analyze_repository_success(analyzer, mock_github):
 
     mock_repo.get_pulls.return_value = [mock_pr]
 
-    # Mock branches
+    # Mock branch data
     mock_branch = Mock()
     mock_branch.name = "feature/test"
     mock_branch.commit.commit.author.date = datetime.now(timezone.utc)
     mock_repo.get_branches.return_value = [mock_branch]
 
-    # Mock issues
+    # Mock issue data
     mock_issue = Mock()
     mock_issue.updated_at = datetime.now(timezone.utc)
     mock_issue.state = "open"
@@ -64,7 +128,7 @@ async def test_analyze_repository_success(analyzer, mock_github):
 
     mock_github.return_value.get_repo.return_value = mock_repo
 
-    # Run analysis
+    # Execute analysis
     metrics = await analyzer.analyze_repository("test/repo")
 
     # Verify results
@@ -82,8 +146,23 @@ async def test_analyze_repository_success(analyzer, mock_github):
 
 @pytest.mark.asyncio
 async def test_analyze_repository_rate_limit(analyzer, mock_github):
-    """Test rate limit handling."""
-    # Mock rate limit exhaustion
+    """
+    Test GitHub API rate limit handling.
+
+    Verifies that the analyzer properly:
+    - Detects rate limit exhaustion
+    - Raises appropriate exception
+    - Includes reset time information
+
+    Args:
+        analyzer: GitHubAnalyzer instance
+        mock_github: Mocked GitHub client
+
+    Assertions:
+        - Raises exception with rate limit message
+        - Exception includes reset time information
+    """
+    # Configure rate limit exhaustion
     rate_limit = MagicMock()
     rate_limit.core.remaining = 0
     rate_limit.core.limit = 5000
@@ -98,8 +177,23 @@ async def test_analyze_repository_rate_limit(analyzer, mock_github):
 
 @pytest.mark.asyncio
 async def test_analyze_repository_error(analyzer, mock_github):
-    """Test error handling."""
-    # Mock GitHub API error
+    """
+    Test error handling during repository analysis.
+
+    Verifies that the analyzer properly:
+    - Handles GitHub API errors
+    - Propagates exceptions with context
+    - Maintains error information
+
+    Args:
+        analyzer: GitHubAnalyzer instance
+        mock_github: Mocked GitHub client
+
+    Assertions:
+        - Raises exception with API error message
+        - Preserves original error information
+    """
+    # Simulate GitHub API error
     mock_github.return_value.get_repo.side_effect = Exception("API Error")
 
     # Verify error handling

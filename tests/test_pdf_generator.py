@@ -1,5 +1,18 @@
+"""
+PDF Generator Test Suite.
+
+This module contains tests for the PDFReportGenerator class, covering:
+- Individual repository report generation
+- Multi-repository summary reports
+- Error handling scenarios
+- PDF formatting and content validation
+
+The tests use pytest fixtures for dependency injection and
+mock objects to simulate report generation dependencies.
+"""
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, ANY
+from unittest.mock import Mock, patch, ANY
 from datetime import datetime, timezone
 from report.pdf_generator import PDFReportGenerator
 from analyzers.repository import (
@@ -15,9 +28,19 @@ from storage.repository_store import StoredAnalysis
 
 @pytest.fixture
 def mock_store():
-    """Mock repository store."""
+    """
+    Mock repository data store.
+
+    Provides a mock store with predefined test data and behaviors:
+    - Sample repository history
+    - Analysis storage functionality
+    - Error scenarios
+
+    Yields:
+        Mock: Configured repository store mock with test data
+    """
     with patch("report.pdf_generator.RepositoryStore") as mock_class:
-        # Create a mock instance
+        # Create a mock instance with sample data
         mock_instance = Mock()
         mock_instance.get_repository_history = Mock(
             return_value=[
@@ -40,16 +63,22 @@ def mock_store():
             ]
         )
         mock_instance.store_analysis = Mock()
-
-        # Make the mock class return our mock instance
         mock_class.return_value = mock_instance
-
         yield mock_instance
 
 
 @pytest.fixture
 def mock_plotter():
-    """Mock repository plotter."""
+    """
+    Mock visualization plotter.
+
+    Provides a mock plotter for generating visualization data:
+    - Empty plot paths for testing
+    - Comparison plot generation
+
+    Yields:
+        Mock: Configured plotter mock for testing
+    """
     with patch("report.pdf_generator.RepositoryPlotter") as mock_class:
         mock_instance = Mock()
         mock_instance.save_plots = Mock(return_value=[])
@@ -60,7 +89,16 @@ def mock_plotter():
 
 @pytest.fixture
 def mock_doc_template():
-    """Mock SimpleDocTemplate."""
+    """
+    Mock PDF document template.
+
+    Provides a mock ReportLab document template for testing:
+    - Document creation
+    - Content building
+
+    Yields:
+        Mock: Configured document template mock
+    """
     with patch("report.pdf_generator.SimpleDocTemplate") as mock_class:
         mock_instance = Mock()
         mock_instance.build = Mock()
@@ -70,7 +108,17 @@ def mock_doc_template():
 
 @pytest.fixture
 def sample_metrics():
-    """Create sample metrics for testing."""
+    """
+    Create sample repository metrics for testing.
+
+    Provides a complete set of test metrics including:
+    - Basic repository statistics
+    - PR type metrics
+    - Branch activity data
+
+    Returns:
+        RepositoryMetrics: Populated metrics object for testing
+    """
     return RepositoryMetrics(
         repository_name="test/repo",
         analysis_date=datetime.now(timezone.utc),
@@ -104,7 +152,28 @@ def sample_metrics():
 def test_generate_report(
     mock_store, mock_plotter, mock_doc_template, sample_metrics, tmp_path
 ):
-    """Test PDF report generation."""
+    """
+    Test individual repository PDF report generation.
+
+    Verifies:
+    - Proper storage of analysis data
+    - Plot generation
+    - PDF document creation and content
+    - File output handling
+
+    Args:
+        mock_store: Repository store mock
+        mock_plotter: Visualization plotter mock
+        mock_doc_template: PDF template mock
+        sample_metrics: Test metrics fixture
+        tmp_path: Temporary directory path
+
+    Assertions:
+        - Analysis data is stored correctly
+        - History is retrieved
+        - Plots are generated
+        - PDF document is created and built
+    """
     output_path = tmp_path / "test_report.pdf"
     generator = PDFReportGenerator()
 
@@ -122,13 +191,26 @@ def test_generate_report(
 
 
 def test_generate_report_error(mock_store, mock_plotter, sample_metrics):
-    """Test PDF generation error handling."""
-    generator = PDFReportGenerator()
+    """
+    Test error handling in PDF report generation.
 
-    # Mock error in plot generation
+    Verifies proper error handling for:
+    - Plot generation failures
+    - File system errors
+    - PDF creation errors
+
+    Args:
+        mock_store: Repository store mock
+        mock_plotter: Visualization plotter mock
+        sample_metrics: Test metrics fixture
+
+    Assertions:
+        - Exceptions are properly raised
+        - Error handling maintains system stability
+    """
+    generator = PDFReportGenerator()
     mock_plotter.return_value.save_plots.side_effect = Exception("Plot error")
 
-    # Verify error handling
     with pytest.raises(Exception):
         generator.generate_report(sample_metrics, "invalid/path/report.pdf")
 
@@ -136,30 +218,58 @@ def test_generate_report_error(mock_store, mock_plotter, sample_metrics):
 def test_generate_summary_report(
     mock_store, mock_plotter, mock_doc_template, sample_metrics, tmp_path
 ):
-    """Test summary report generation."""
+    """
+    Test multi-repository summary report generation.
+
+    Verifies:
+    - Comparison plot generation
+    - Summary document creation
+    - Multi-repository data handling
+
+    Args:
+        mock_store: Repository store mock
+        mock_plotter: Visualization plotter mock
+        mock_doc_template: PDF template mock
+        sample_metrics: Test metrics fixture
+        tmp_path: Temporary directory path
+
+    Assertions:
+        - Comparison plots are generated
+        - Summary document is created and built
+        - Output file is properly handled
+    """
     output_path = tmp_path / "test_summary.pdf"
     generator = PDFReportGenerator()
-
-    # Create sample results
     results = {"test/repo1": sample_metrics, "test/repo2": sample_metrics}
 
-    # Generate summary report
     generator.generate_summary_report(results, str(output_path))
 
-    # Verify interactions
     mock_plotter.create_comparison_plots.assert_called_once_with(results)
     mock_doc_template.assert_called_once_with(str(output_path), pagesize=ANY)
     mock_doc_template.return_value.build.assert_called_once()
 
 
 def test_generate_summary_report_error(mock_store, mock_plotter, sample_metrics):
-    """Test summary report error handling."""
-    generator = PDFReportGenerator()
+    """
+    Test error handling in summary report generation.
 
-    # Mock error in plot generation
+    Verifies proper error handling for:
+    - Plot comparison failures
+    - File system errors
+    - PDF creation errors
+
+    Args:
+        mock_store: Repository store mock
+        mock_plotter: Visualization plotter mock
+        sample_metrics: Test metrics fixture
+
+    Assertions:
+        - Exceptions are properly raised
+        - Error handling maintains system stability
+    """
+    generator = PDFReportGenerator()
     mock_plotter.create_comparison_plots.side_effect = Exception("Plot error")
 
-    # Verify error handling
     with pytest.raises(Exception):
         generator.generate_summary_report(
             {"test/repo": sample_metrics}, "invalid/path/summary.pdf"
