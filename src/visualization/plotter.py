@@ -13,176 +13,11 @@ The module uses matplotlib and seaborn for creating publication-quality visualiz
 and handles proper file management for generated plots.
 """
 
-from typing import Dict, List, Any, Optional
+from typing import Dict, List
 import matplotlib.pyplot as plt
-import seaborn as sns
-from datetime import datetime
-import pandas as pd
 import os
-import numpy as np
 
-from storage.repository_store import StoredAnalysis
 from analyzers.repository import RepositoryMetrics
-from config import logger
-
-
-class AnalysisPlotter:
-    """
-    Base plotter class for creating analysis visualizations.
-
-    Provides foundational plotting capabilities with consistent styling
-    and formatting across all visualizations.
-
-    Attributes:
-        None
-    """
-
-    def __init__(self):
-        """
-        Initialize plotter with consistent visual styling.
-
-        Sets up seaborn whitegrid style and default figure dimensions
-        for consistent visualization appearance.
-        """
-        sns.set_style("whitegrid")
-        plt.rcParams["figure.figsize"] = (12, 6)
-
-    def _parse_timestamp(self, timestamp: str) -> datetime:
-        """
-        Convert ISO timestamp string to datetime object.
-
-        Args:
-            timestamp (str): ISO format timestamp string
-
-        Returns:
-            datetime: Parsed datetime object
-        """
-        return datetime.fromisoformat(timestamp)
-
-    def create_time_series_plot(
-        self,
-        history: List[Dict[str, Any]],
-        metric_name: str,
-        title: Optional[str] = None,
-    ) -> plt.Figure:
-        """
-        Generate time series visualization for a metric.
-
-        Creates a line plot showing the evolution of a specific metric
-        over time with proper formatting and annotations.
-
-        Args:
-            history (List[Dict[str, Any]]): Historical analysis data points
-            metric_name (str): Name of the metric to visualize
-            title (Optional[str]): Custom plot title
-
-        Returns:
-            plt.Figure: Generated matplotlib figure object
-        """
-        # Extract timestamps and metric values
-        timestamps = [self._parse_timestamp(item["timestamp"]) for item in history]
-        values = [item["data"].get(metric_name, 0) for item in history]
-
-        # Create DataFrame for plotting
-        df = pd.DataFrame({"timestamp": timestamps, "value": values})
-
-        # Create the plot
-        fig, ax = plt.subplots()
-        sns.lineplot(data=df, x="timestamp", y="value", marker="o")
-
-        # Customize the plot
-        plt.xticks(rotation=45)
-        plt.title(title or f"{metric_name} Over Time")
-        plt.xlabel("Date")
-        plt.ylabel(metric_name)
-
-        # Adjust layout to prevent label cutoff
-        plt.tight_layout()
-
-        return fig
-
-    def create_comparison_plot(
-        self,
-        history: List[Dict[str, Any]],
-        metrics: List[str],
-        title: Optional[str] = None,
-    ) -> plt.Figure:
-        """
-        Create comparative visualization of multiple metrics.
-
-        Generates a multi-line plot comparing different metrics
-        over time on the same axes.
-
-        Args:
-            history (List[Dict[str, Any]]): Historical analysis data
-            metrics (List[str]): List of metrics to compare
-            title (Optional[str]): Custom plot title
-
-        Returns:
-            plt.Figure: Generated matplotlib figure object
-        """
-        timestamps = [self._parse_timestamp(item["timestamp"]) for item in history]
-
-        # Create DataFrame with all metrics
-        data = []
-        for metric in metrics:
-            values = [item["data"].get(metric, 0) for item in history]
-            for t, v in zip(timestamps, values):
-                data.append({"timestamp": t, "value": v, "metric": metric})
-
-        df = pd.DataFrame(data)
-
-        # Create the plot
-        fig, ax = plt.subplots()
-        sns.lineplot(data=df, x="timestamp", y="value", hue="metric", marker="o")
-
-        # Customize the plot
-        plt.xticks(rotation=45)
-        plt.title(title or "Metrics Comparison Over Time")
-        plt.xlabel("Date")
-        plt.ylabel("Value")
-        plt.legend(title="Metrics")
-
-        # Adjust layout
-        plt.tight_layout()
-
-        return fig
-
-    def create_distribution_plot(
-        self,
-        history: List[Dict[str, Any]],
-        metric_name: str,
-        title: Optional[str] = None,
-    ) -> plt.Figure:
-        """
-        Generate distribution plot for metric values.
-
-        Creates a histogram with kernel density estimation to show
-        the distribution of values for a specific metric.
-
-        Args:
-            history (List[Dict[str, Any]]): Historical analysis data
-            metric_name (str): Name of the metric to analyze
-            title (Optional[str]): Custom plot title
-
-        Returns:
-            plt.Figure: Generated matplotlib figure object
-        """
-        values = [item["data"].get(metric_name, 0) for item in history]
-
-        # Create the plot
-        fig, ax = plt.subplots()
-        sns.histplot(values, kde=True)
-
-        # Customize the plot
-        plt.title(title or f"{metric_name} Distribution")
-        plt.xlabel(metric_name)
-        plt.ylabel("Count")
-
-        # Adjust layout
-        plt.tight_layout()
-
-        return fig
 
 
 class RepositoryPlotter:
@@ -207,316 +42,88 @@ class RepositoryPlotter:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def create_pr_trend_plot(self, history: List[StoredAnalysis]) -> plt.Figure:
-        """
-        Create pull request trend visualization.
-
-        Generates a line plot showing the trends of open and merged
-        pull requests over time.
+    def create_pr_type_trends_plot(
+        self, history: List[RepositoryMetrics], interval: str, pr_types: List[str]
+    ) -> plt.Figure:
+        """Create historical trend plot for PR types.
 
         Args:
-            history (List[StoredAnalysis]): Historical analysis data
-
+            history (List[RepositoryMetrics]): Historical repository metrics
+            interval (str): The interval to plot (e.g., "7", "30", "60")
+            pr_types (List[str]): List of PR types to plot
         Returns:
             plt.Figure: Generated trend plot figure
         """
+        # Extract dates and PR type data
         dates = [h.analysis_date for h in history]
-        open_prs = [h.metrics["open_prs"] for h in history]
-        merged_prs = [h.metrics["merged_prs"] for h in history]
+        # Create figure with two subplots (Open and Closed)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12))
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(dates, open_prs, marker="o", label="Open PRs")
-        ax.plot(dates, merged_prs, marker="s", label="Merged PRs")
+        # Plot open PRs
+        for pr_type in pr_types:
+            values = [
+                h.pr_interval_metrics[interval].open.get(pr_type, 0) for h in history
+            ]
+            ax1.plot(dates, values, marker="o", label=pr_type.capitalize())
 
-        ax.set_title("Pull Request Trends")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Count")
-        ax.legend()
-        ax.grid(True)
-
-        # Rotate date labels for better readability
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-
-        return fig
-
-    def create_pr_type_distribution_plot(
-        self, history: List[StoredAnalysis]
-    ) -> plt.Figure:
-        """
-        Create pull request type distribution visualization.
-
-        Generates a bar plot showing the distribution of different
-        PR types (open vs. merged) in the latest analysis.
-
-        Args:
-            history (List[StoredAnalysis]): Historical analysis data
-
-        Returns:
-            plt.Figure: Generated distribution plot figure
-        """
-        latest = history[0]  # Most recent analysis
-        pr_types = latest.metrics["pr_types"]
-
-        types = [pt["type"] for pt in pr_types]
-        open_counts = [pt["open_count"] for pt in pr_types]
-        merged_counts = [pt["merged_count"] for pt in pr_types]
-
-        fig, ax = plt.subplots(figsize=(12, 6))
-        x = range(len(types))
-        width = 0.35
-
-        ax.bar([i - width / 2 for i in x], open_counts, width, label="Open")
-        ax.bar([i + width / 2 for i in x], merged_counts, width, label="Merged")
-
-        ax.set_title("Pull Request Type Distribution")
-        ax.set_xlabel("PR Type")
-        ax.set_ylabel("Count")
-        ax.set_xticks(x)
-        ax.set_xticklabels(types, rotation=45)
-        ax.legend()
-        plt.tight_layout()
-
-        return fig
-
-    def create_branch_activity_plot(self, history: List[StoredAnalysis]) -> plt.Figure:
-        """
-        Create branch activity visualization.
-
-        Generates a dual-panel plot showing branch activity patterns
-        for both 7-day and 30-day periods.
-
-        Args:
-            history (List[StoredAnalysis]): Historical analysis data
-
-        Returns:
-            plt.Figure: Generated activity plot figure
-        """
-        latest = history[0]  # Most recent analysis
-        branch_activity = latest.metrics["branch_activity"]
-
-        types = [ba["type"] for ba in branch_activity]
-        opened_7d = [ba["opened"]["last_7_days"] for ba in branch_activity]
-        closed_7d = [ba["closed"]["last_7_days"] for ba in branch_activity]
-        opened_30d = [ba["opened"]["last_30_days"] for ba in branch_activity]
-        closed_30d = [ba["closed"]["last_30_days"] for ba in branch_activity]
-
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-
-        # 7 days plot
-        x = range(len(types))
-        width = 0.35
-        ax1.bar([i - width / 2 for i in x], opened_7d, width, label="Opened")
-        ax1.bar([i + width / 2 for i in x], closed_7d, width, label="Closed")
-        ax1.set_title("Branch Activity (Last 7 Days)")
-        ax1.set_xlabel("Branch Type")
+        ax1.set_title(f"Open PRs by Type (Last {interval} days)")
+        ax1.set_xlabel("Date")
         ax1.set_ylabel("Count")
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(types, rotation=45)
-        ax1.legend()
+        ax1.legend(title="PR Types")
+        ax1.grid(True)
+        plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
 
-        # 30 days plot
-        ax2.bar([i - width / 2 for i in x], opened_30d, width, label="Opened")
-        ax2.bar([i + width / 2 for i in x], closed_30d, width, label="Closed")
-        ax2.set_title("Branch Activity (Last 30 Days)")
-        ax2.set_xlabel("Branch Type")
+        # Plot closed PRs
+        for pr_type in pr_types:
+            values = [
+                h.pr_interval_metrics[interval].closed.get(pr_type, 0) for h in history
+            ]
+            ax2.plot(dates, values, marker="o", label=pr_type.capitalize())
+
+        ax2.set_title(f"Closed PRs by Type (Last {interval} days)")
+        ax2.set_xlabel("Date")
         ax2.set_ylabel("Count")
-        ax2.set_xticks(x)
-        ax2.set_xticklabels(types, rotation=45)
-        ax2.legend()
+        ax2.legend(title="PR Types")
+        ax2.grid(True)
+        plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
 
         plt.tight_layout()
         return fig
 
-    def save_plots(self, history: List[StoredAnalysis]) -> List[str]:
-        """
-        Generate and save all repository analysis plots.
-
-        Creates a complete set of visualizations for a repository
-        and saves them to the configured output directory.
+    def create_pr_type_trends_plots(
+        self,
+        history: List[RepositoryMetrics],
+        intervals: List[str],
+        pr_types: List[str],
+    ) -> Dict[str, plt.Figure]:
+        """Create historical trend plots for all intervals.
 
         Args:
-            history (List[StoredAnalysis]): Historical analysis data
+            history (List[RepositoryMetrics]): Historical repository metrics
+            intervals (List[str]): List of intervals to plot
+            pr_types (List[str]): List of PR types to plot
 
         Returns:
-            List[str]: Paths to all generated plot files
-
-        Raises:
-            Exception: If plot generation or saving fails
+            Dict[str, plt.Figure]: Dictionary of interval to plot figure
         """
         if not history:
-            return []
+            return {}
 
-        repo_name = history[0].repository_name.replace("/", "_")
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Create plots for each interval
+        plots = {}
+        for interval in intervals:
+            plots[interval] = self.create_pr_type_trends_plot(
+                history, interval, pr_types
+            )
 
-        plots = [
-            ("pr_trend", self.create_pr_trend_plot),
-            ("pr_distribution", self.create_pr_type_distribution_plot),
-            ("branch_activity", self.create_branch_activity_plot),
-        ]
+        return plots
 
-        saved_plots = []
-        for name, plot_func in plots:
-            try:
-                fig = plot_func(history)
-                filename = f"{repo_name}_{name}_{timestamp}.png"
-                filepath = os.path.join(self.output_dir, filename)
-                fig.savefig(filepath)
-                plt.close(fig)
-                saved_plots.append(filepath)
-            except Exception as e:
-                logger.error(
-                    {
-                        "message": f"Failed to create {name} plot",
-                        "repository": repo_name,
-                        "error": str(e),
-                    }
-                )
-
-        return saved_plots
-
-    def create_comparison_plots(
-        self, results: Dict[str, RepositoryMetrics]
-    ) -> List[str]:
-        """
-        Create comparative visualizations across repositories.
-
-        Generates a set of plots comparing metrics across multiple
-        repositories, including:
-        - PR status comparison
-        - Issue status comparison
-        - PR types distribution
+    def delete_old_plots(self, interval: int):
+        """Delete plots older than the given interval.
 
         Args:
-            results (Dict[str, RepositoryMetrics]): Analysis results by repository
-
-        Returns:
-            List[str]: Paths to generated comparison plot files
-
-        Raises:
-            Exception: If plot generation or saving fails
-
-        Note:
-            Automatically cleans up partial results if generation fails
+            interval (int): The interval to delete plots older than
         """
-        if not results:
-            return []
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        saved_plots = []
-
-        try:
-            # PR Status Comparison
-            fig, ax = plt.subplots(figsize=(12, 6))
-            repos = list(results.keys())
-            x = range(len(repos))
-            width = 0.35
-
-            open_prs = [metrics.open_prs for metrics in results.values()]
-            merged_prs = [metrics.merged_prs for metrics in results.values()]
-
-            ax.bar([i - width / 2 for i in x], open_prs, width, label="Open PRs")
-            ax.bar([i + width / 2 for i in x], merged_prs, width, label="Merged PRs")
-
-            ax.set_title("Pull Request Status Comparison")
-            ax.set_xlabel("Repository")
-            ax.set_ylabel("Count")
-            ax.set_xticks(x)
-            ax.set_xticklabels(repos, rotation=45, ha="right")
-            ax.legend()
-            plt.tight_layout()
-
-            # Save PR comparison plot
-            pr_plot_path = os.path.join(
-                self.output_dir, f"pr_comparison_{timestamp}.png"
-            )
-            fig.savefig(pr_plot_path)
-            plt.close(fig)
-            saved_plots.append(pr_plot_path)
-
-            # Issue Status Comparison
-            fig, ax = plt.subplots(figsize=(12, 6))
-            open_issues = [metrics.open_issues for metrics in results.values()]
-            total_issues = [metrics.total_issues for metrics in results.values()]
-
-            ax.bar([i - width / 2 for i in x], open_issues, width, label="Open Issues")
-            ax.bar(
-                [i + width / 2 for i in x], total_issues, width, label="Total Issues"
-            )
-
-            ax.set_title("Issue Status Comparison")
-            ax.set_xlabel("Repository")
-            ax.set_ylabel("Count")
-            ax.set_xticks(x)
-            ax.set_xticklabels(repos, rotation=45, ha="right")
-            ax.legend()
-            plt.tight_layout()
-
-            # Save issue comparison plot
-            issue_plot_path = os.path.join(
-                self.output_dir, f"issue_comparison_{timestamp}.png"
-            )
-            fig.savefig(issue_plot_path)
-            plt.close(fig)
-            saved_plots.append(issue_plot_path)
-
-            # PR Types Distribution
-            fig, ax = plt.subplots(figsize=(12, 6))
-            pr_types = set()
-            for metrics in results.values():
-                pr_types.update(pt.type.value for pt in metrics.pr_types)
-
-            pr_types = sorted(pr_types)
-            bar_positions = np.arange(len(repos))
-            bar_width = 0.15
-
-            for i, pr_type in enumerate(pr_types):
-                counts = []
-                for metrics in results.values():
-                    type_metrics = next(
-                        (pt for pt in metrics.pr_types if pt.type.value == pr_type),
-                        None,
-                    )
-                    counts.append(type_metrics.total_count if type_metrics else 0)
-
-                ax.bar(
-                    bar_positions + i * bar_width,
-                    counts,
-                    bar_width,
-                    label=pr_type.title(),
-                )
-
-            ax.set_title("Pull Request Types Distribution")
-            ax.set_xlabel("Repository")
-            ax.set_ylabel("Count")
-            ax.set_xticks(bar_positions + bar_width * (len(pr_types) - 1) / 2)
-            ax.set_xticklabels(repos, rotation=45, ha="right")
-            ax.legend()
-            plt.tight_layout()
-
-            # Save PR types plot
-            pr_types_plot_path = os.path.join(
-                self.output_dir, f"pr_types_comparison_{timestamp}.png"
-            )
-            fig.savefig(pr_types_plot_path)
-            plt.close(fig)
-            saved_plots.append(pr_types_plot_path)
-
-            return saved_plots
-
-        except Exception as e:
-            logger.error(
-                {"message": "Failed to create comparison plots", "error": str(e)}
-            )
-            # Clean up any partially created plots
-            for plot_path in saved_plots:
-                try:
-                    if os.path.exists(plot_path):
-                        os.remove(plot_path)
-                except Exception:
-                    pass
-            raise
-        finally:
-            # Ensure all plots are closed
-            plt.close("all")
+        for file in os.listdir(self.output_dir):
+            if file.endswith(".png") and int(file.split("_")[-2]) < interval:
+                os.remove(os.path.join(self.output_dir, file))

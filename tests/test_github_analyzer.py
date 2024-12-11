@@ -3,200 +3,197 @@ GitHub Analyzer Test Suite.
 
 This module contains tests for the GitHubAnalyzer class, covering:
 - Repository analysis functionality
-- Rate limit handling
+- PR type classification
+- Interval-based metrics
 - Error scenarios
-- Mock GitHub API interactions
-
-The tests use pytest fixtures for dependency injection and
-mock objects to simulate GitHub API responses.
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timezone
-from analyzers.repository import GitHubAnalyzer, RepositoryMetrics
-
-
-@pytest.fixture(autouse=True)
-def mock_settings():
-    """
-    Mock application settings for testing.
-
-    Provides a mock settings object with predefined values for:
-    - GitHub token
-    - Log level
-
-    Yields:
-        MagicMock: Mocked settings object with test configuration
-    """
-    with patch("analyzers.repository.settings") as mock_settings:
-        mock_settings.github_token = "dummy_token"
-        mock_settings.log_level = "INFO"
-        yield mock_settings
+from miners.models import RepositoryPRData, RepositoryIssueData, RepositoryData
+from analyzers.repository import GitHubAnalyzer
+from analyzers.models import RepositoryMetrics
 
 
 @pytest.fixture
-def mock_github():
-    """
-    Mock GitHub API client.
-
-    Provides a mock GitHub client with preconfigured rate limits and
-    simulated API responses.
-
-    Yields:
-        MagicMock: Mocked GitHub client with test configuration
-
-    Note:
-        Includes mock rate limit configuration with:
-        - 1000 remaining calls
-        - 5000 total limit
-        - Current time as reset time
-    """
-    with patch("analyzers.repository.Github") as mock:
-        # Mock rate limit configuration
-        rate_limit = MagicMock()
-        rate_limit.core.remaining = 1000
-        rate_limit.core.limit = 5000
-        rate_limit.core.reset.replace.return_value = datetime.now(timezone.utc)
-        mock.return_value.get_rate_limit.return_value = rate_limit
-        yield mock
+def sample_pull_requests():
+    """Create sample pull requests for testing."""
+    now = datetime.now(timezone.utc)
+    return [
+        RepositoryPRData(
+            pr_number=1,
+            title="feat: new feature",
+            body="Feature description",
+            state="open",
+            labels=["feature"],
+            assignees=["user1"],
+            reviewers=["user2"],
+            created_at=now,
+            updated_at=now,
+            closed_at=None,
+            merged_at=None,
+            head_ref="feature/new-feature",
+            author="user1",
+            issue_url=None,
+        ),
+        RepositoryPRData(
+            pr_number=2,
+            title="fix: bug fix",
+            body="Bug fix description",
+            state="closed",
+            labels=["bugfix"],
+            assignees=["user2"],
+            reviewers=["user1"],
+            created_at=now,
+            updated_at=now,
+            closed_at=now,
+            merged_at=now,
+            head_ref="fix/bug-fix",
+            author="user2",
+            issue_url=None,
+        ),
+        RepositoryPRData(
+            pr_number=3,
+            title="test: new tests",
+            body="Test description",
+            state="open",
+            labels=["test"],
+            assignees=["user3"],
+            reviewers=["user1"],
+            created_at=now,
+            updated_at=now,
+            closed_at=None,
+            merged_at=None,
+            head_ref="test/new-tests",
+            author="user3",
+            issue_url=None,
+        ),
+    ]
 
 
 @pytest.fixture
-def analyzer(mock_github):
-    """
-    Create GitHubAnalyzer instance for testing.
+def sample_issues():
+    """Create sample issues for testing."""
+    now = datetime.now(timezone.utc)
+    return [
+        RepositoryIssueData(
+            issue_number=1,
+            title="Issue 1",
+            body="Issue description",
+            state="open",
+            labels=["bug"],
+            assignees=["user1"],
+            created_at=now,
+            updated_at=now,
+            closed_at=None,
+            author="user1",
+            url=None,
+        ),
+        RepositoryIssueData(
+            issue_number=2,
+            title="Issue 2",
+            body="Issue description",
+            state="closed",
+            labels=["enhancement"],
+            assignees=["user2"],
+            created_at=now,
+            updated_at=now,
+            closed_at=now,
+            author="user2",
+            url=None,
+        ),
+    ]
 
-    Args:
-        mock_github: Mocked GitHub client fixture
 
-    Returns:
-        GitHubAnalyzer: Analyzer instance with mocked dependencies
-    """
-    return GitHubAnalyzer()
+@pytest.fixture
+def sample_repo_data(sample_pull_requests, sample_issues):
+    """Create sample repository data for testing."""
+    return RepositoryData(
+        repository_name="test/repo",
+        collection_date=datetime.now(timezone.utc),
+        pull_requests=sample_pull_requests,
+        issues=sample_issues,
+    )
+
+
+@pytest.fixture
+def analyzer():
+    """Create GitHubAnalyzer instance for testing."""
+    return GitHubAnalyzer(intervals=[7, 30, 60])
 
 
 @pytest.mark.asyncio
-async def test_analyze_repository_success(analyzer, mock_github):
-    """
-    Test successful repository analysis scenario.
-
-    Verifies that the analyzer correctly:
-    - Processes repository data
-    - Handles pull requests
-    - Analyzes branches
-    - Tracks issues
-    - Generates metrics
-
-    Args:
-        analyzer: GitHubAnalyzer instance
-        mock_github: Mocked GitHub client
-
-    Assertions:
-        - Returns valid RepositoryMetrics instance
-        - Contains expected repository name
-        - Has valid counts for PRs, branches, and issues
-        - Includes PR type analysis
-        - Includes branch activity metrics
-    """
-    # Mock repository data
-    mock_repo = Mock()
-
-    # Mock pull request data
-    mock_pr = Mock()
-    mock_pr.title = "feat: new feature"
-    mock_pr.body = "Feature description"
-    mock_pr.labels = []
-    mock_pr.updated_at = datetime.now(timezone.utc)
-    mock_pr.created_at = datetime.now(timezone.utc)
-    mock_pr.merged_at = None
-    mock_pr.head.ref = "feature/new-feature"
-
-    mock_repo.get_pulls.return_value = [mock_pr]
-
-    # Mock branch data
-    mock_branch = Mock()
-    mock_branch.name = "feature/test"
-    mock_branch.commit.commit.author.date = datetime.now(timezone.utc)
-    mock_repo.get_branches.return_value = [mock_branch]
-
-    # Mock issue data
-    mock_issue = Mock()
-    mock_issue.updated_at = datetime.now(timezone.utc)
-    mock_issue.state = "open"
-    mock_repo.get_issues.return_value = [mock_issue]
-
-    mock_github.return_value.get_repo.return_value = mock_repo
-
+async def test_analyze_repository_success(analyzer, sample_repo_data):
+    """Test successful repository analysis scenario."""
     # Execute analysis
-    metrics = await analyzer.analyze_repository("test/repo")
+    metrics = await analyzer.analyze_repository(sample_repo_data)
 
-    # Verify results
+    # Verify basic metrics
     assert isinstance(metrics, RepositoryMetrics)
     assert metrics.repository_name == "test/repo"
-    assert metrics.total_prs >= 0
-    assert metrics.open_prs >= 0
-    assert metrics.merged_prs >= 0
-    assert metrics.active_branches >= 0
-    assert metrics.total_issues >= 0
-    assert metrics.open_issues >= 0
-    assert len(metrics.pr_types) > 0
-    assert len(metrics.branch_activity) > 0
+    assert metrics.total_prs_count == 3
+    assert metrics.open_prs_count == 2
+    assert metrics.closed_prs_count == 1
+    assert metrics.total_issues_count == 2
+    assert metrics.open_issues_count == 1
+
+    # Verify PR interval metrics
+    assert "7" in metrics.pr_interval_metrics
+    assert "30" in metrics.pr_interval_metrics
+    assert "60" in metrics.pr_interval_metrics
+
+    # Verify PR types in interval metrics
+    seven_day_metrics = metrics.pr_interval_metrics["7"]
+    assert "feature" in seven_day_metrics.open
+    assert "bugfix" in seven_day_metrics.closed
+    assert "test" in seven_day_metrics.open
+
+    # Verify contributors
+    assert metrics.contributors_count == 3
+    assert "user1" in metrics.top_contributors
+    assert len(metrics.top_contributors) == 1
 
 
 @pytest.mark.asyncio
-async def test_analyze_repository_rate_limit(analyzer, mock_github):
-    """
-    Test GitHub API rate limit handling.
+async def test_analyze_repository_empty_data(analyzer):
+    """Test analysis with empty repository data."""
+    empty_data = RepositoryData(
+        repository_name="test/repo",
+        collection_date=datetime.now(timezone.utc),
+        pull_requests=[],
+        issues=[],
+    )
 
-    Verifies that the analyzer properly:
-    - Detects rate limit exhaustion
-    - Raises appropriate exception
-    - Includes reset time information
+    metrics = await analyzer.analyze_repository(empty_data)
 
-    Args:
-        analyzer: GitHubAnalyzer instance
-        mock_github: Mocked GitHub client
-
-    Assertions:
-        - Raises exception with rate limit message
-        - Exception includes reset time information
-    """
-    # Configure rate limit exhaustion
-    rate_limit = MagicMock()
-    rate_limit.core.remaining = 0
-    rate_limit.core.limit = 5000
-    rate_limit.core.reset.replace.return_value = datetime.now(timezone.utc)
-    mock_github.return_value.get_rate_limit.return_value = rate_limit
-
-    # Verify rate limit exception
-    with pytest.raises(Exception) as exc_info:
-        await analyzer.analyze_repository("test/repo")
-    assert "rate limit exhausted" in str(exc_info.value)
+    assert metrics.total_prs_count == 0
+    assert metrics.open_prs_count == 0
+    assert metrics.closed_prs_count == 0
+    assert metrics.total_issues_count == 0
+    assert metrics.open_issues_count == 0
+    assert metrics.contributors_count == 0
+    assert len(metrics.top_contributors) == 0
 
 
-@pytest.mark.asyncio
-async def test_analyze_repository_error(analyzer, mock_github):
-    """
-    Test error handling during repository analysis.
+def test_work_activity_type_classification(analyzer):
+    """Test PR type classification logic."""
+    # Test with labels
+    assert analyzer._work_activity_type("PR Title", "", ["feature"]) == "feature"
+    assert analyzer._work_activity_type("PR Title", "", ["bugfix"]) == "bugfix"
+    assert analyzer._work_activity_type("PR Title", "", ["test"]) == "test"
 
-    Verifies that the analyzer properly:
-    - Handles GitHub API errors
-    - Propagates exceptions with context
-    - Maintains error information
+    # Test with title patterns
+    assert analyzer._work_activity_type("feat: new feature", "", []) == "feature"
+    assert analyzer._work_activity_type("fix: bug fix", "", []) == "bugfix"
+    assert analyzer._work_activity_type("test: new tests", "", []) == "test"
+    assert analyzer._work_activity_type("refactor: code cleanup", "", []) == "refactor"
 
-    Args:
-        analyzer: GitHubAnalyzer instance
-        mock_github: Mocked GitHub client
+    # Test with body content
+    assert (
+        analyzer._work_activity_type("PR Title", "feature implementation", [])
+        == "feature"
+    )
+    assert analyzer._work_activity_type("PR Title", "fixing bug #123", []) == "bugfix"
 
-    Assertions:
-        - Raises exception with API error message
-        - Preserves original error information
-    """
-    # Simulate GitHub API error
-    mock_github.return_value.get_repo.side_effect = Exception("API Error")
-
-    # Verify error handling
-    with pytest.raises(Exception) as exc_info:
-        await analyzer.analyze_repository("test/repo")
-    assert "API Error" in str(exc_info.value)
+    # Test fallback
+    assert analyzer._work_activity_type("random title", "random body", []) == "other"

@@ -1,11 +1,10 @@
 """
 Multi-Repository Analysis Module.
 
-Provides functionality for analyzing multiple GitHub repositories in parallel
-and generating both individual and summary reports. This module coordinates
-the analysis process and report generation for configured repositories.
+This module provides functionality for analyzing multiple GitHub repositories in parallel
+and generating both individual and summary reports. It coordinates the analysis process
+and report generation for configured repositories, handling:
 
-The module handles:
 - Parallel repository analysis
 - Individual PDF report generation
 - Summary report generation across all repositories
@@ -13,34 +12,49 @@ The module handles:
 """
 
 from datetime import datetime
-from typing import Dict
+from typing import List, Dict
 
-from config import settings, logger
-from analyzers.repository import GitHubAnalyzer, RepositoryMetrics
-from report.pdf_generator import PDFReportGenerator
+from config import logger
+from analyzers.repository import GitHubAnalyzer
+from analyzers.models import RepositoryMetrics
+from miners.base import RepositoryMiner
+from storage.repository_store import RepositoryStore
 
 
 class MultiRepositoryAnalyzer:
     """
-    Analyzer for processing multiple GitHub repositories.
+    Coordinates the analysis of multiple GitHub repositories.
 
-    This class coordinates the analysis of multiple repositories,
-    handles report generation, and manages the overall analysis workflow.
+    This class manages the workflow for analyzing multiple repositories,
+    generating reports, and storing results. It ensures efficient processing
+    and error handling throughout the analysis lifecycle.
 
     Attributes:
-        analyzer (GitHubAnalyzer): Instance for analyzing individual repositories
-        pdf_generator (PDFReportGenerator): Instance for generating PDF reports
+        analyzer (GitHubAnalyzer): Instance for analyzing individual repositories.
+        store (RepositoryStore): Instance for storing analysis results.
+        miner (RepositoryMiner): Instance for mining repository data.
+        repository_urls (List[str]): List of repository URLs to analyze.
     """
 
-    def __init__(self):
-        """
-        Initialize the multi-repository analyzer.
+    def __init__(
+        self,
+        repository_store: RepositoryStore,
+        analyzer: GitHubAnalyzer,
+        miner: RepositoryMiner,
+        repository_urls: List[str],
+    ):
+        """Initialize the multi-repository analyzer.
 
-        Sets up the GitHub analyzer with authentication and
-        initializes the PDF report generator.
+        Args:
+            repository_store (RepositoryStore): Instance for storing analysis results.
+            analyzer (GitHubAnalyzer): Instance for analyzing individual repositories.
+            miner (RepositoryMiner): Instance for mining repository data.
+            repository_urls (List[str]): List of repository URLs to analyze.
         """
-        self.analyzer = GitHubAnalyzer(settings.github_token.get_secret_value())
-        self.pdf_generator = PDFReportGenerator()
+        self.analyzer = analyzer
+        self.store = repository_store
+        self.miner = miner
+        self.repository_urls = repository_urls
 
     async def analyze_repositories(self) -> Dict[str, RepositoryMetrics]:
         """
@@ -58,7 +72,7 @@ class MultiRepositoryAnalyzer:
             with remaining repositories.
         """
         results = {}
-        for repo_url in settings.repository_urls:
+        for repo_url in self.repository_urls:
             try:
                 # Extract repository name from URL
                 repo_name = str(repo_url).rstrip(".git").split("/")[-2:]
@@ -68,13 +82,45 @@ class MultiRepositoryAnalyzer:
                     {"message": "Analyzing repository", "repository": repo_name}
                 )
 
-                # Analyze repository and generate report
-                metrics = await self.analyzer.analyze_repository(repo_name)
-                results[repo_name] = metrics
+                # Load repository data
+                repo_data = self.store.load_repository_data(repo_name)
 
-                # Generate individual repository report
-                report_path = self._get_report_path(repo_name)
-                self.pdf_generator.generate_report(metrics, report_path)
+                # Skip mining if data exists and is from today
+                if (
+                    repo_data
+                    and repo_data[-1].collection_date.date() == datetime.now().date()
+                ):
+                    logger.info(
+                        {
+                            "message": "Repository data already exists for today, skipping mining",
+                            "repository": repo_name,
+                        }
+                    )
+                else:
+                    repo_data = await self.miner.mine_repository(repo_name)
+                    self.store.save_repository_data(repo_data)
+                    repo_data = [repo_data]
+
+                # Check if analysis has been done today
+                analysis = self.store.load_analysis(repo_name)
+                if (
+                    analysis
+                    and analysis[0].analysis_date.date() == datetime.now().date()
+                ):
+                    logger.info(
+                        {
+                            "message": "Repository analysis already exists for today, skipping analysis",
+                            "repository": repo_name,
+                        }
+                    )
+                    results[repo_name] = analysis[0]
+                    continue
+
+                # Analyze repository and generate report
+                repo_metrics = await self.analyzer.analyze_repository(repo_data[0])
+                results[repo_name] = repo_metrics
+                # Store analysis results for historical tracking
+                self.store.store_analysis(repo_metrics.model_dump())
 
             except Exception as e:
                 logger.error(
@@ -86,58 +132,3 @@ class MultiRepositoryAnalyzer:
                 )
 
         return results
-
-    def _get_report_path(self, repo_name: str, is_summary: bool = False) -> str:
-        """
-        Generate the file path for a repository report.
-
-        Args:
-            repo_name (str): Name of the repository
-            is_summary (bool, optional): Whether this is a summary report.
-                Defaults to False.
-
-        Returns:
-            str: Full path for the report file
-
-        Note:
-            Report filenames include timestamps to prevent overwrites
-            and maintain history.
-        """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = (
-            f"summary_{timestamp}.pdf"
-            if is_summary
-            else f"{repo_name.replace('/', '_')}_{timestamp}.pdf"
-        )
-        return f"{settings.report_output_dir}/{filename}"
-
-    def generate_summary_report(self, results: Dict[str, RepositoryMetrics]) -> str:
-        """
-        Generate a summary report across all analyzed repositories.
-
-        Creates a comprehensive report comparing metrics across all
-        successfully analyzed repositories.
-
-        Args:
-            results (Dict[str, RepositoryMetrics]): Collection of repository
-                analysis results
-
-        Returns:
-            str: Path to the generated summary report
-
-        Raises:
-            Exception: If report generation fails
-
-        Note:
-            The summary report includes comparative analytics and trends
-            across all repositories.
-        """
-        try:
-            report_path = self._get_report_path("", is_summary=True)
-            self.pdf_generator.generate_summary_report(results, report_path)
-            return report_path
-        except Exception as e:
-            logger.error(
-                {"message": "Failed to generate summary report", "error": str(e)}
-            )
-            raise

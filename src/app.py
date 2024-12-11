@@ -18,6 +18,11 @@ import os
 
 from config import settings, logger
 from analyzers.multi_repository import MultiRepositoryAnalyzer
+from analyzers.repository import GitHubAnalyzer
+from miners.github_miner import GitHubMiner, RepositoryMiner
+from storage.repository_store import RepositoryStore
+from report.pdf_generator import PDFReportGenerator
+from visualization.plotter import RepositoryPlotter
 
 
 async def main() -> None:
@@ -44,18 +49,48 @@ async def main() -> None:
     # Create output directory for reports
     os.makedirs(settings.report_output_dir, exist_ok=True)
 
+    # Initialize GitHub miner
+    logger.debug("initializing github miner...")
+    github_miner: RepositoryMiner = GitHubMiner(
+        settings.github_token.get_secret_value(),
+        max(settings.intervals),
+    )
+
     # Initialize repository analyzer
-    analyzer = MultiRepositoryAnalyzer()
+    logger.debug("initializing repository analyzer...")
+    store = RepositoryStore(settings.data_dir)
+    analyzer = GitHubAnalyzer(settings.intervals)
+    multi_analyzer = MultiRepositoryAnalyzer(
+        store, analyzer, github_miner, settings.repository_urls
+    )
 
     # Execute analysis on all repositories
-    results = await analyzer.analyze_repositories()
+    logger.info("analyzing repositories...")
+    repo_metrics = await multi_analyzer.analyze_repositories()
 
-    # Generate summary report if results are available
-    if results:
-        analyzer.generate_summary_report(results)
-        logger.info("Analysis completed successfully!")
-    else:
-        logger.warning("No repository analysis results available")
+    # Get all analysis from data store per repo
+    # store the data in a dict with repo_name as key and analysis as value
+    logger.info("loading historical data from data store...")
+    historical_data = {}
+    for repo_name, _ in repo_metrics.items():
+        historical_data[repo_name] = store.load_analysis(repo_name)
+
+    logger.info("generating reports...")
+
+    # Create temporary directory for plots
+    temp_plot_dir = os.path.join(settings.report_output_dir, "temp_plots")
+    os.makedirs(temp_plot_dir, exist_ok=True)
+
+    plotter = RepositoryPlotter(temp_plot_dir)
+    pdf_generator = PDFReportGenerator(plotter)
+    pdf_generator.generate_report(
+        repo_metrics, historical_data, settings.report_output_dir, temp_plot_dir
+    )
+
+    # delete plots older than max(settings.intervals),
+    plotter.delete_old_plots(max(settings.intervals))
+
+    logger.info("application finished")
 
 
 if __name__ == "__main__":

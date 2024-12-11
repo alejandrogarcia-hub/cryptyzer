@@ -52,9 +52,28 @@ class Settings(BaseSettings):
 
     # Optional configuration with defaults
     log_level: int = Field(default=10, description="Logging level, default debug")
+
+    data_dir: str = Field(default="data", description="Data output directory")
+
     report_output_dir: str = Field(
         default="reports", description="Report output directory"
     )
+
+    interval_days: str = Field(
+        default="7,30,60", description="Comma-separated interval days to analyze"
+    )
+
+    @property
+    def intervals(self) -> List[int]:
+        """
+        Get interval days from configuration.
+
+        Splits and cleans the comma-separated interval days string.
+
+        Returns:
+            List[int]: List of interval days
+        """
+        return [int(day) for day in self.interval_days.split(",")]
 
     @property
     def repository_urls(self) -> List[str]:
@@ -99,7 +118,7 @@ settings = Settings()
 
 # Initialize logging configuration
 logger = LogManager(
-    app_name=settings.app_name,
+    app_name=settings.app_name.lower(),
     log_dir=settings.log_dir,
     development=settings.dev,
     level=settings.log_level,
