@@ -1,3 +1,16 @@
+"""
+Application Configuration Module.
+
+Manages application settings and environment variables using Pydantic for validation.
+Provides centralized configuration management with type safety and validation.
+
+Features:
+- Environment variable loading and validation
+- Secure credential management
+- Configuration validation and type checking
+- Path normalization for output directories
+"""
+
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
@@ -6,8 +19,27 @@ from logger import LogManager
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """
+    Application configuration settings with validation.
 
+    Manages and validates all application settings including:
+    - Application identification
+    - GitHub authentication
+    - Repository configurations
+    - Logging settings
+    - Output directory configurations
+
+    Attributes:
+        app_name (str): Name of the application
+        dev (bool): Debug mode flag
+        log_dir (str): Directory for log files
+        github_token (SecretStr): GitHub API authentication token
+        github_repo_urls (str): Comma-separated repository URLs
+        log_level (int): Logging level (default: debug)
+        report_output_dir (str): Directory for generated reports
+    """
+
+    # Application settings
     app_name: str = Field(default="Cryptyzer", description="Application name")
     dev: bool = Field(default=False, description="Debug mode")
     log_dir: str = Field(default="logs", description="Logging directory")
@@ -20,18 +52,54 @@ class Settings(BaseSettings):
 
     # Optional configuration with defaults
     log_level: int = Field(default=10, description="Logging level, default debug")
+
+    data_dir: str = Field(default="data", description="Data output directory")
+
     report_output_dir: str = Field(
         default="reports", description="Report output directory"
     )
 
+    interval_days: str = Field(
+        default="7,30,60", description="Comma-separated interval days to analyze"
+    )
+
+    @property
+    def intervals(self) -> List[int]:
+        """
+        Get interval days from configuration.
+
+        Splits and cleans the comma-separated interval days string.
+
+        Returns:
+            List[int]: List of interval days
+        """
+        return [int(day) for day in self.interval_days.split(",")]
+
     @property
     def repository_urls(self) -> List[str]:
-        """Get list of repository URLs."""
+        """
+        Get list of repository URLs from configuration.
+
+        Splits and cleans the comma-separated repository URLs string.
+
+        Returns:
+            List[str]: List of cleaned repository URLs
+        """
         return [url.strip() for url in self.github_repo_urls.split(",")]
 
     @field_validator("report_output_dir")
-    def ensure_absolute_path(cls, v):
-        """Ensure report output directory is an absolute path."""
+    def ensure_absolute_path(cls, v: str) -> str:
+        """
+        Ensure report directory path is absolute.
+
+        Converts relative paths to absolute paths based on current working directory.
+
+        Args:
+            v (str): Directory path to validate
+
+        Returns:
+            str: Absolute path to report directory
+        """
         if not os.path.isabs(v):
             return os.path.abspath(v)
         return v
@@ -48,9 +116,9 @@ class Settings(BaseSettings):
 # Create global settings instance
 settings = Settings()
 
-# Initialize logging
+# Initialize logging configuration
 logger = LogManager(
-    app_name=settings.app_name,
+    app_name=settings.app_name.lower(),
     log_dir=settings.log_dir,
     development=settings.dev,
     level=settings.log_level,
