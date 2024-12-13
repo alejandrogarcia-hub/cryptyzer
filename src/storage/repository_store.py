@@ -265,6 +265,8 @@ class RepositoryStore:
             if isinstance(data_list, dict):
                 data_list = [data_list]
 
+            # Sort by date descending and apply limit if specified
+            data_list.sort(key=lambda x: x["collection_date"], reverse=True)
             # Convert all items to RepositoryData objects
             return [RepositoryData(**data) for data in data_list]
 

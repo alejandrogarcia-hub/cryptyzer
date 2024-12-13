@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "matplotlib>=3.9.3",
+    "openai>=1.57.2",
     "pandas>=2.2.3",
     "pyarrow>=18.1.0",
     "pydantic>=2.10.2",
@@ -15,6 +16,8 @@ dependencies = [
     "python-json-logger>=2.0.7",
     "reportlab>=4.2.5",
     "seaborn>=0.13.2",
+    "tenacity>=9.0.0",
+    "tiktoken>=0.8.0",
 ]
 
 [dependency-groups]

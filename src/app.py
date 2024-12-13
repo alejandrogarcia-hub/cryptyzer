@@ -16,6 +16,9 @@ and generate comprehensive reports.
 import asyncio
 import os
 
+from openai import AsyncOpenAI
+import tiktoken
+
 from config import settings, logger
 from analyzers.multi_repository import MultiRepositoryAnalyzer
 from analyzers.repository import GitHubAnalyzer
@@ -23,6 +26,11 @@ from miners.github_miner import GitHubMiner, RepositoryMiner
 from storage.repository_store import RepositoryStore
 from report.pdf_generator import PDFReportGenerator
 from visualization.plotter import RepositoryPlotter
+from analyzers.plugins.category_analyzer import (
+    CategoryAnalyzerPlugin,
+    PRTypeCategoryAnalyzerPlugin,
+    LLMPRTypeCategoryAnalyzerPlugin,
+)
 
 
 async def main() -> None:
@@ -45,6 +53,7 @@ async def main() -> None:
         - Failed repository analyses are logged but don't stop execution
     """
     logger.info("Starting multi-repository analysis...")
+    logger.info(f"AI_BASED: {settings.ai_based}")
 
     # Create output directory for reports
     os.makedirs(settings.report_output_dir, exist_ok=True)
@@ -56,10 +65,27 @@ async def main() -> None:
         max(settings.intervals),
     )
 
+    # Initialize OpenAI client
+    logger.debug("initializing category analyzer...")
+    category_analyzer: CategoryAnalyzerPlugin = PRTypeCategoryAnalyzerPlugin()
+    if settings.ai_based:
+        logger.debug("initializing openai client...")
+        openai_client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
+        encoding = tiktoken.encoding_for_model(settings.openai_encoding_name)
+        category_analyzer = LLMPRTypeCategoryAnalyzerPlugin(
+            openai_client,
+            encoding,
+            settings.openai_max_requests_per_minute,
+            settings.openai_max_tokens_per_minute,
+            settings.data_dir,
+            settings.openai_period,
+        )
+
     # Initialize repository analyzer
     logger.debug("initializing repository analyzer...")
+
     store = RepositoryStore(settings.data_dir)
-    analyzer = GitHubAnalyzer(settings.intervals)
+    analyzer = GitHubAnalyzer(settings.intervals, category_analyzer)
     multi_analyzer = MultiRepositoryAnalyzer(
         store, analyzer, github_miner, settings.repository_urls
     )
