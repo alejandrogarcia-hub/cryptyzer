@@ -133,6 +133,8 @@ class MultiRepositoryAnalyzer:
                         "message": "Failed to analyze repository",
                         "repository": repo_name,
                         "error": str(e),
+                        # add line where the error happens
+                        "error_line": e.__traceback__.tb_lineno,
                     }
                 )
 

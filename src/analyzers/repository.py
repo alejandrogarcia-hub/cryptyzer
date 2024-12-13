@@ -13,9 +13,7 @@ of all analysis operations.
 
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict
-import asyncio
 
-from github.RateLimit import RateLimit
 import pandas as pd
 
 from config import logger
@@ -39,96 +37,18 @@ class GitHubAnalyzer:
     """
 
     def __init__(self, intervals: List[int], category_analyzer: CategoryAnalyzerPlugin):
+        """
+        Initialize the GitHubAnalyzer with the given intervals and category analyzer.
+
+        Args:
+            intervals (List[int]): List of time intervals in days.
+            category_analyzer (CategoryAnalyzerPlugin): The plugin used for PR type classification.
+        """
         _now = datetime.now(timezone.utc)
         self.timeframes = {
             str(interval): _now - timedelta(days=interval) for interval in intervals
         }
         self.category_analyzer = category_analyzer
-        self.semaphore = asyncio.Semaphore(10)
-
-    def _check_rate_limit(self, check_name: str = None) -> None:
-        """
-        Check GitHub API rate limit status and handle limits.
-
-        Args:
-            check_name (str, optional): Name of the check point for logging.
-
-        Raises:
-            Exception: When rate limit is exhausted, with time until reset.
-        """
-        rate_limit: RateLimit = self.github.get_rate_limit().core
-        remaining = rate_limit.remaining
-        reset_time = rate_limit.reset.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-
-        # Log current rate limit status
-        logger.info(
-            {
-                "message": f"{check_name} API rate limit status",
-                "remaining_points": remaining,
-                "total_points": rate_limit.limit,
-                "reset_time": reset_time.isoformat(),
-                "minutes_to_reset": (reset_time - now).total_seconds() / 60,
-            }
-        )
-
-        # If less than 10% of rate limit remains, log a warning
-        if remaining < (rate_limit.limit * 0.1) and remaining > 0:
-            logger.warning(
-                {
-                    "message": "GitHub API rate limit running low",
-                    "remaining_points": remaining,
-                    "reset_time": reset_time.isoformat(),
-                }
-            )
-
-        # If rate limit is exhausted, log critical and wait for reset
-        if remaining == 0:
-            wait_time = (reset_time - now).total_seconds()
-            logger.critical(
-                {
-                    "message": "GitHub API rate limit exhausted",
-                    "reset_time": reset_time.isoformat(),
-                    "wait_time_seconds": wait_time,
-                }
-            )
-            raise Exception(
-                f"GitHub API rate limit exhausted. Resets in {wait_time/60:.1f} minutes"
-            )
-
-    async def _classify_batch_prs(
-        self, prs_df: pd.DataFrame, feature_labels: List[str]
-    ) -> Dict[str, str]:
-        """
-        Classify all PRs asynchronously using batch processing.
-
-        Args:
-            prs_df (pd.DataFrame): DataFrame containing PR data
-            feature_labels (List[str]): Available PR type labels
-
-        Returns:
-            Dict[str, str]: Dictionary mapping PR numbers to their types
-        """
-
-        # Prepare PR data for batch processing
-        prs_data = []
-        for i, row in prs_df.iterrows():
-            prs_data.append(
-                {
-                    "row": i,
-                    "pr_number": row["pr_number"],
-                    "title": row["title"],
-                    "body": row["body"] or "",
-                    "labels": [label for label in row["labels"]],
-                }
-            )
-
-        # Use batch processing for classification
-        results = await self.category_analyzer.categorize_batch(
-            prs_data, feature_labels
-        )
-
-        return results
 
     async def _classify_all_prs(
         self, prs_df: pd.DataFrame, feature_labels: List[str]
@@ -154,41 +74,6 @@ class GitHubAnalyzer:
         ]
 
         pr_types = await self.category_analyzer.categorize_all(tasks, feature_labels)
-        return pr_types
-
-    async def _classify_prs(
-        self, prs_df: pd.DataFrame, feature_labels: List[str]
-    ) -> Dict[str, str]:
-        """
-        Classify all PRs asynchronously using batch processing.
-
-        Args:
-            prs_df (pd.DataFrame): DataFrame containing PR data
-
-        Returns:
-            Dict[str, str]: Dictionary mapping PR numbers to their types
-        """
-
-        async def limited_categorize(pr_info, feature_labels):
-            async with self.semaphore:
-                # This ensures no more than 10 categorize calls run concurrently
-                return await self.category_analyzer.categorize(pr_info, feature_labels)
-
-        tasks = []
-        for _, row in prs_df.iterrows():
-            tasks.append(
-                limited_categorize(
-                    {
-                        "pr_number": row["pr_number"],
-                        "title": row["title"],
-                        "body": row["body"] or "",
-                        "labels": [label for label in row["labels"]],
-                    },
-                    feature_labels,
-                )
-            )
-
-        pr_types = await asyncio.gather(*tasks)
         return pr_types
 
     async def analyze_repository(self, repo_data: RepositoryData) -> RepositoryMetrics:

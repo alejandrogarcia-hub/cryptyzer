@@ -13,14 +13,14 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from tiktoken import Encoding
 
 
-from analyzers.repository import PullRequestType
+from analyzers.models import PullRequestType
 from config import settings, logger
 
 
 class CategoryAnalyzerPlugin:
     """Base class for category analyzer plugins."""
 
-    async def categorize(self, data: Any, feature_labels: List[str]) -> str:
+    async def categorize(self, data: Any, feature_labels: List[str]) -> Dict[str, Any]:
         """Categorize the given data."""
         pass
 
@@ -38,26 +38,44 @@ class CategoryAnalyzerPlugin:
 
 
 class PRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
-    def categorize(self, data: Dict, feature_labels: List[str]) -> str:
+
+    async def categorize_all(
+        self, prs_data: List[Dict], feature_labels: List[str]
+    ) -> List[Dict]:
+        """This process all data in a single batch but it is rate limited.
+
+        Args:
+            prs_data (List[Dict]): List of pull request data
+            feature_labels (List[str]): Available PR type labels
+
+        Returns:
+            List[Dict]: List of classified PRs
+        """
+
+        return [self.categorize(data, feature_labels) for data in prs_data]
+
+    def categorize(self, data: Dict, feature_labels: List[str]) -> Dict[str, Any]:
         """
         Categorize pull request type based on metadata.
 
         Args:
             data (Dict): Pull request data
+            feature_labels (List[str]): Available PR type labels
 
         Example:
             data = {
+                "pr_number": 123,
                 "title": "Add new feature",
                 "body": "This is a new feature",
                 "labels": ["feature", "enhancement"]
             }
 
         Returns:
-            PullRequestType: Classified pull request type based on content and labels.
+            Dict[str, Any]: Classified pull request type based on content and labels.
         """
-        title_lower = data.title.lower()
-        combined_text = f"{title_lower} {data.body.lower() if data.body else ''}"
-        labels_lower = [label.lower() for label in data.labels]
+        title_lower = data["title"].lower()
+        combined_text = f"{title_lower} {data['body'].lower() if data['body'] else ''}"
+        labels_lower = [label.lower() for label in data["labels"]]
 
         result = None
         # Check labels first
@@ -94,7 +112,10 @@ class PRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
         elif "issue" in combined_text or "#" in title_lower:
             result = PullRequestType.ISSUE
 
-        return result.value if result else PullRequestType.OTHER.value
+        return {
+            "pr_number": data["pr_number"],
+            "pr_type": result.value if result else PullRequestType.OTHER.value,
+        }
 
 
 class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
@@ -129,9 +150,11 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
         self.encoding = encoding
         self.data_dir = data_dir
         self.request_times = deque()
+        self.token_counts = deque()
         self.max_requests = max_requests
         self.max_tokens = max_tokens
         self.period = period
+        self.temperature = 0.2
 
     def _count_tokens(self, text: str) -> int:
         """
@@ -145,29 +168,55 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
         """
         return len(self.encoding.encode(text))
 
-    async def _rate_limit(self):
+    async def _rate_limit(self, token_count: int = 0):
         """
         Rate limit the requests to the OpenAI API.
         This is to avoid rate limiting and ensure that we don't overload the API.
+        Handles both request rate limits and token rate limits.
+
+        Args:
+            token_count (int): Number of tokens in the current request
         """
         now = time.monotonic()
-        # Remove timestamps older than the allowed period
+
+        # Remove timestamps and token counts older than the allowed period
         while self.request_times and (now - self.request_times[0]) > self.period:
             self.request_times.popleft()
+            if self.token_counts:  # Remove corresponding token count
+                self.token_counts.popleft()
 
-        # If we're at capacity, wait until we're no longer rate-limited
-        if len(self.request_times) >= self.max_requests:
-            # Next available time slot is after the oldest request plus the period
-            wait_time = self.period - (now - self.request_times[0])
+        # Check both request count and token count limits
+        while len(self.request_times) >= self.max_requests or (
+            self.token_counts and sum(self.token_counts) + token_count > self.max_tokens
+        ):
+            # Calculate wait times for both limits
+            request_wait_time = 0
+            token_wait_time = 0
+
+            if len(self.request_times) >= self.max_requests:
+                request_wait_time = self.period - (now - self.request_times[0])
+
+            if (
+                self.token_counts
+                and sum(self.token_counts) + token_count > self.max_tokens
+            ):
+                token_wait_time = self.period - (now - self.request_times[0])
+
+            # Wait for the longer of the two wait times
+            wait_time = max(request_wait_time, token_wait_time)
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
-            # Clean up old timestamps again after waiting
+
+            # Update time and clean up old entries again
             now = time.monotonic()
             while self.request_times and (now - self.request_times[0]) > self.period:
                 self.request_times.popleft()
+                if self.token_counts:
+                    self.token_counts.popleft()
 
-        # Record current request
-        self.request_times.append(time.monotonic())
+        # Record current request and token count
+        self.request_times.append(now)
+        self.token_counts.append(token_count)
 
     def _prepare_pr_prompt(self, pr_data: Dict, feature_labels: List[str]) -> str:
         """
@@ -189,44 +238,10 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
         }}
         """
 
-    def _prepare_batch_prompt(
-        self, prs_data: List[Dict], feature_labels: List[str]
-    ) -> str:
-        """
-        Prepare a batch prompt for multiple PRs.
-
-        Args:
-            prs_data (List[Dict]): List of pull request data
-            feature_labels (List[str]): Available PR type labels
-
-        Returns:
-            str: Formatted batch prompt for the LLM
-        """
-        prs_text = "\n\n".join(
-            f"Index: {pr['row']}\n"
-            f"Number: {pr['number']}\n"
-            f"Title: {pr['title']}\n"
-            f"Description: {pr['body'] if pr['body'] else 'No description'}\n"
-            f"Labels: {', '.join(pr['labels'])}"
-            for i, pr in enumerate(prs_data)
-        )
-
-        return f"""Analyze each pull request and classify it into one of these categories: {', '.join(feature_labels)} and use lowercase.
-
-{prs_text}
-
-For each PR, respond with exactly one tuple (index, number, category) per line. Where index is the Index of the PR in the input list, number is the PR number, and category is the category of the PR.
-
-Example:
-(0, 123, "feature")
-(1, 456, "bugfix")
-(2, 789, "test")
-"""
-
     async def categorize_all(
         self, prs_data: List[Dict], feature_labels: List[str]
     ) -> List[Dict]:
-        """This is a batch process and it will be rate limited.
+        """This process all data in a single batch but it is rate limited.
 
         Args:
             prs_data (List[Dict]): List of pull request data
@@ -249,7 +264,7 @@ Example:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
     )
-    async def categorize(self, data: Dict, feature_labels: List[str]) -> Dict[str, str]:
+    async def categorize(self, data: Dict, feature_labels: List[str]) -> Dict[str, Any]:
         """
         Classify a single pull request using LLM.
 
@@ -258,7 +273,7 @@ Example:
             feature_labels (List[str]): Available PR type labels
 
         Returns:
-            Dict[str, str]: Classified PR type
+            Dict[str, Any]: Classified PR type
 
         Raises:
             Exception: If classification fails
@@ -278,7 +293,7 @@ Example:
             "labels": [<list of strings>]
         }}
         
-        , and do your best to understand and infer a category other than "other". 
+        , and do your best to understand and infer a category other than "other". When you are not sure, output "other". 
         Output a string containing the following information: "pr_number,category"
         - pr_number is the same as the input pr_number
         - category is your assigment category to the PR and must be one of the categories in the list
@@ -294,8 +309,8 @@ Example:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.2,
-                max_tokens=10,
+                temperature=self.temperature,
+                max_tokens=10,  # if you see the output truncated, increase this number
                 timeout=120,
             )
 
@@ -313,7 +328,10 @@ Example:
         self, prs_data: List[Dict], feature_labels: List[str]
     ) -> List[str]:
         """
-        Classify multiple pull requests in batches.
+        Classify multiple pull requests in batches. This is a good way to save some money, the API costs are half asof today (13/12/2024)
+        The only problem is that the response is only guaranteed to comeback in 24 hours (completion_window="24h") ...
+        it usally takes a lot less but responses come on 10 of minutes to hours. There is no other way to get the results faster.
+        Left the implementation for future reference.
 
         Args:
             prs_data (List[Dict]): List of pull request data
@@ -336,14 +354,14 @@ Example:
             "labels": [<list of strings>]
         }}
         
-        , and you will output a json object containing the following information:
-        Example:
-        {{
-            "pr_number": <number>,
-            "pr_type": <text>
-        }}
+        where number is an integer and text is a string. Please, do your best to understand and infer a category other than "other". 
+        When you are not sure, output the category "other". You will output a json object containing the following information:
+        {{"pr_number":<number>,"pr_type":<text>}}
         
-        Respond with exactly one json object per line. Where pr_number is the PR number, and pr_type is the category of the PR.
+        Respond with exactly one json object per line.
+        - number is an integer and text is a string.
+        - pr_number is the same as the input pr_number
+        - pr_type is your assigment category to the PR and must be one of the categories in the list
         """
 
         logger.info(f"processing in a single batch {len(prs_data)} PRs")
@@ -355,8 +373,8 @@ Example:
                 "url": "/v1/chat/completions",
                 "body": {
                     # This is what you would have in your Chat Completions API call
-                    "model": "gpt-4o-mini",
-                    "temperature": 0.1,
+                    "model": settings.openai_llm_model,
+                    "temperature": self.temperature,
                     "response_format": {"type": "json_object"},
                     "messages": [
                         {"role": "system", "content": system_prompt},
