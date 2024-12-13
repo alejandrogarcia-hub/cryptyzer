@@ -38,7 +38,6 @@ class CategoryAnalyzerPlugin:
 
 
 class PRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
-
     async def categorize_all(
         self, prs_data: List[Dict], feature_labels: List[str]
     ) -> List[Dict]:
@@ -137,7 +136,7 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
         encoding: Encoding,
         max_requests: int,
         max_tokens: int,
-        period: int,
+        period: float,
         data_dir: str,
     ):
         """
@@ -154,7 +153,7 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
         self.max_requests = max_requests
         self.max_tokens = max_tokens
         self.period = period
-        self.temperature = 0.2
+        self.temperature = 0.1
 
     def _count_tokens(self, text: str) -> int:
         """
@@ -177,46 +176,66 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
         Args:
             token_count (int): Number of tokens in the current request
         """
-        now = time.monotonic()
+        try:
+            now = time.monotonic()
 
-        # Remove timestamps and token counts older than the allowed period
-        while self.request_times and (now - self.request_times[0]) > self.period:
-            self.request_times.popleft()
-            if self.token_counts:  # Remove corresponding token count
-                self.token_counts.popleft()
+            # Remove timestamps and token counts older than the allowed period
+            while self.request_times and (now - self.request_times[0]) > self.period:
+                self.request_times.popleft()
+                if self.token_counts:  # Remove corresponding token count
+                    self.token_counts.popleft()
 
-        # Check both request count and token count limits
-        while len(self.request_times) >= self.max_requests or (
-            self.token_counts and sum(self.token_counts) + token_count > self.max_tokens
-        ):
-            # Calculate wait times for both limits
-            request_wait_time = 0
-            token_wait_time = 0
-
-            if len(self.request_times) >= self.max_requests:
-                request_wait_time = self.period - (now - self.request_times[0])
-
-            if (
+            # Check both request count and token count limits
+            while len(self.request_times) >= self.max_requests or (
                 self.token_counts
                 and sum(self.token_counts) + token_count > self.max_tokens
             ):
-                token_wait_time = self.period - (now - self.request_times[0])
+                # Calculate wait times for both limits
+                request_wait_time = 0
+                token_wait_time = 0
 
-            # Wait for the longer of the two wait times
-            wait_time = max(request_wait_time, token_wait_time)
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
+                if len(self.request_times) >= self.max_requests:
+                    request_wait_time = self.period - (now - self.request_times[0])
+                    logger.debug(
+                        f"Request count limit reached. Waiting for {request_wait_time} seconds."
+                    )
 
-            # Update time and clean up old entries again
-            now = time.monotonic()
-            while self.request_times and (now - self.request_times[0]) > self.period:
-                self.request_times.popleft()
-                if self.token_counts:
-                    self.token_counts.popleft()
+                if (
+                    self.token_counts
+                    and sum(self.token_counts) + token_count > self.max_tokens
+                ):
+                    token_wait_time = self.period - (now - self.request_times[0])
+                    logger.debug(
+                        f"Token count limit reached. Waiting for {token_wait_time} seconds."
+                    )
 
-        # Record current request and token count
-        self.request_times.append(now)
-        self.token_counts.append(token_count)
+                # Wait for the longer of the two wait times
+                wait_time = max(request_wait_time, token_wait_time)
+                logger.debug(f"Waiting for {wait_time} seconds.")
+                if wait_time > 0:
+                    await asyncio.sleep(wait_time)
+
+                # Update time and clean up old entries again
+                now = time.monotonic()
+                while (
+                    self.request_times and (now - self.request_times[0]) > self.period
+                ):
+                    self.request_times.popleft()
+                    if self.token_counts:
+                        self.token_counts.popleft()
+
+            # Record current request and token count
+            self.request_times.append(now)
+            self.token_counts.append(token_count)
+        except Exception as e:
+            logger.error(
+                {
+                    "message": "Error rate limiting",
+                    "error": str(e),
+                    "error_line": e.__traceback__.tb_lineno,
+                }
+            )
+            raise e
 
     def _prepare_pr_prompt(self, pr_data: Dict, feature_labels: List[str]) -> str:
         """
@@ -253,7 +272,9 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
 
         async def rate_limited_categorize(pr_info, feature_labels):
             # Enforce rate limit before making request
-            await self._rate_limit()
+            prompt = self._prepare_pr_prompt(pr_info, feature_labels)
+            token_count = self._count_tokens(prompt) + 300
+            await self._rate_limit(token_count)
             return await self.categorize(pr_info, feature_labels)
 
         tasks = [rate_limited_categorize(data, feature_labels) for data in prs_data]
@@ -317,7 +338,13 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
             content = response.choices[0].message.content.strip().split(",")
             return {"pr_number": content[0], "pr_type": content[1]}
         except Exception as e:
-            logger.error(f"Error classifying PR: {e}")
+            logger.error(
+                {
+                    "message": "Error classifying PR",
+                    "error": str(e),
+                    "error_line": e.__traceback__.tb_lineno,
+                }
+            )
             raise e
 
     @retry(
@@ -462,5 +489,11 @@ class LLMPRTypeCategoryAnalyzerPlugin(CategoryAnalyzerPlugin):
             logger.info("batch processing done ...")
             return results
         except Exception as e:
-            logger.error(f"Error processing batch: {e}")
+            logger.error(
+                {
+                    "message": "Error processing batch",
+                    "error": str(e),
+                    "error_line": e.__traceback__.tb_lineno,
+                }
+            )
             raise e

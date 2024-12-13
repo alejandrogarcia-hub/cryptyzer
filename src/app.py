@@ -71,14 +71,14 @@ async def main() -> None:
     if settings.ai_based:
         logger.debug("initializing openai client...")
         openai_client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
-        encoding = tiktoken.encoding_for_model(settings.openai_encoding_name)
+        encoding = tiktoken.get_encoding(settings.openai_encoding_name)
         category_analyzer = LLMPRTypeCategoryAnalyzerPlugin(
             openai_client,
             encoding,
             settings.openai_max_requests_per_minute,
             settings.openai_max_tokens_per_minute,
-            settings.data_dir,
             settings.openai_period,
+            settings.data_dir,
         )
 
     # Initialize repository analyzer

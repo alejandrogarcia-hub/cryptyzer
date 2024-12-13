@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     openai_max_tokens_per_minute: int = Field(
         default=200000, description="OpenAI max tokens per minute"
     )
-    openai_period: int = Field(default=60, description="OpenAI period in seconds")
+    openai_period: float = Field(default=60.0, description="OpenAI period in seconds")
 
     # AI Analysis configuration
     ai_based: bool = Field(default=False, description="Use AI-based analysis")

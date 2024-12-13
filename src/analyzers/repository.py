@@ -245,6 +245,7 @@ class GitHubAnalyzer:
                     "message": "Repository analysis failed",
                     "repository": repo_data.repository_name,
                     "error": str(e),
+                    "error_line": e.__traceback__.tb_lineno,
                 }
             )
             raise e
