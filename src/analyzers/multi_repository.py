@@ -82,13 +82,13 @@ class MultiRepositoryAnalyzer:
                     {"message": "Analyzing repository", "repository": repo_name}
                 )
 
-                # Load repository data
+                # Load repository data, remember it comes sorted by date
                 repo_data = self.store.load_repository_data(repo_name)
 
                 # Skip mining if data exists and is from today
                 if (
                     repo_data
-                    and repo_data[-1].collection_date.date() == datetime.now().date()
+                    and repo_data[0].collection_date.date() == datetime.now().date()
                 ):
                     logger.info(
                         {
@@ -116,6 +116,11 @@ class MultiRepositoryAnalyzer:
                     results[repo_name] = analysis[0]
                     continue
 
+                # why we do this? we try to simulate a pipeline.
+                # analyze_repositories, can be splitted and run asynchronously
+                # we load the data from the store, then we analyze it
+                # and then we store the results
+                repo_data = self.store.load_repository_data(repo_name)
                 # Analyze repository and generate report
                 repo_metrics = await self.analyzer.analyze_repository(repo_data[0])
                 results[repo_name] = repo_metrics
@@ -128,6 +133,8 @@ class MultiRepositoryAnalyzer:
                         "message": "Failed to analyze repository",
                         "repository": repo_name,
                         "error": str(e),
+                        # add line where the error happens
+                        "error_line": e.__traceback__.tb_lineno,
                     }
                 )
 

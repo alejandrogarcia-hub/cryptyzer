@@ -10,9 +10,19 @@ This module contains tests for the GitHubAnalyzer class, covering:
 
 import pytest
 from datetime import datetime, timezone
+
+import pandas as pd
+
 from miners.models import RepositoryPRData, RepositoryIssueData, RepositoryData
 from analyzers.repository import GitHubAnalyzer
-from analyzers.models import RepositoryMetrics
+from analyzers.plugins.category_analyzer import PRTypeCategoryAnalyzerPlugin
+from analyzers.models import RepositoryMetrics, PullRequestType
+
+
+@pytest.fixture
+def feature_labels():
+    """Create sample feature labels for testing."""
+    return [pr_type.value for pr_type in PullRequestType]
 
 
 @pytest.fixture
@@ -117,9 +127,15 @@ def sample_repo_data(sample_pull_requests, sample_issues):
 
 
 @pytest.fixture
-def analyzer():
+def category_analyzer():
+    """Create PRTypeCategoryAnalyzerPlugin instance for testing."""
+    return PRTypeCategoryAnalyzerPlugin()
+
+
+@pytest.fixture
+def analyzer(category_analyzer):
     """Create GitHubAnalyzer instance for testing."""
-    return GitHubAnalyzer(intervals=[7, 30, 60])
+    return GitHubAnalyzer(intervals=[7, 30, 60], category_analyzer=category_analyzer)
 
 
 @pytest.mark.asyncio
@@ -175,25 +191,12 @@ async def test_analyze_repository_empty_data(analyzer):
     assert len(metrics.top_contributors) == 0
 
 
-def test_work_activity_type_classification(analyzer):
+@pytest.mark.asyncio
+async def test_classify_all_prs(analyzer, sample_pull_requests, feature_labels):
     """Test PR type classification logic."""
     # Test with labels
-    assert analyzer._work_activity_type("PR Title", "", ["feature"]) == "feature"
-    assert analyzer._work_activity_type("PR Title", "", ["bugfix"]) == "bugfix"
-    assert analyzer._work_activity_type("PR Title", "", ["test"]) == "test"
 
-    # Test with title patterns
-    assert analyzer._work_activity_type("feat: new feature", "", []) == "feature"
-    assert analyzer._work_activity_type("fix: bug fix", "", []) == "bugfix"
-    assert analyzer._work_activity_type("test: new tests", "", []) == "test"
-    assert analyzer._work_activity_type("refactor: code cleanup", "", []) == "refactor"
-
-    # Test with body content
-    assert (
-        analyzer._work_activity_type("PR Title", "feature implementation", [])
-        == "feature"
-    )
-    assert analyzer._work_activity_type("PR Title", "fixing bug #123", []) == "bugfix"
-
-    # Test fallback
-    assert analyzer._work_activity_type("random title", "random body", []) == "other"
+    prs_df = pd.DataFrame([sample.model_dump() for sample in sample_pull_requests])
+    pr_types = await analyzer._classify_all_prs(prs_df, feature_labels)
+    for resp, feature_label in zip(pr_types, ["feature", "bugfix", "test"]):
+        assert resp["pr_type"] == feature_label

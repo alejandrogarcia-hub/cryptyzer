@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     - Repository configurations
     - Logging settings
     - Output directory configurations
+    - OpenAI configuration
+    - AI analysis settings
 
     Attributes:
         app_name (str): Name of the application
@@ -37,6 +39,9 @@ class Settings(BaseSettings):
         github_repo_urls (str): Comma-separated repository URLs
         log_level (int): Logging level (default: debug)
         report_output_dir (str): Directory for generated reports
+        openai_api_key (SecretStr): OpenAI API key
+        openai_llm_model (str): OpenAI LLM model to use
+        ai_based (bool): Whether to use AI-based analysis
     """
 
     # Application settings
@@ -49,6 +54,24 @@ class Settings(BaseSettings):
     github_repo_urls: str = Field(
         ..., description="Comma-separated GitHub repository URLs to analyze"
     )
+
+    # OpenAI configuration
+    openai_api_key: SecretStr = Field(..., description="OpenAI API key")
+    openai_llm_model: str = Field(default="gpt-4-mini", description="OpenAI LLM model")
+    openai_embedding_model: str = Field(
+        default="text-embedding-3-small", description="OpenAI embedding model"
+    )
+    openai_encoding_name: str = Field(default="o200k_base", description="Encoding name")
+    openai_max_requests_per_minute: int = Field(
+        default=500, description="OpenAI max requests per minute"
+    )
+    openai_max_tokens_per_minute: int = Field(
+        default=200000, description="OpenAI max tokens per minute"
+    )
+    openai_period: float = Field(default=60.0, description="OpenAI period in seconds")
+
+    # AI Analysis configuration
+    ai_based: bool = Field(default=False, description="Use AI-based analysis")
 
     # Optional configuration with defaults
     log_level: int = Field(default=10, description="Logging level, default debug")

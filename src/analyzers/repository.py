@@ -12,9 +12,8 @@ of all analysis operations.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Dict
 
-from github.RateLimit import RateLimit
 import pandas as pd
 
 from config import logger
@@ -24,6 +23,7 @@ from analyzers.models import (
     RepositoryMetrics,
     PRMetrics,
 )
+from analyzers.plugins.category_analyzer import CategoryAnalyzerPlugin
 
 
 class GitHubAnalyzer:
@@ -36,118 +36,47 @@ class GitHubAnalyzer:
 
     """
 
-    def __init__(self, intervals: List[int]):
+    def __init__(self, intervals: List[int], category_analyzer: CategoryAnalyzerPlugin):
+        """
+        Initialize the GitHubAnalyzer with the given intervals and category analyzer.
+
+        Args:
+            intervals (List[int]): List of time intervals in days.
+            category_analyzer (CategoryAnalyzerPlugin): The plugin used for PR type classification.
+        """
         _now = datetime.now(timezone.utc)
         self.timeframes = {
             str(interval): _now - timedelta(days=interval) for interval in intervals
         }
+        self.category_analyzer = category_analyzer
 
-    def _check_rate_limit(self, check_name: str = None) -> None:
+    async def _classify_all_prs(
+        self, prs_df: pd.DataFrame, feature_labels: List[str]
+    ) -> Dict[str, str]:
         """
-        Check GitHub API rate limit status and handle limits.
+        Classify all PRs asynchronously using batch processing.
 
         Args:
-            check_name (str, optional): Name of the check point for logging.
-
-        Raises:
-            Exception: When rate limit is exhausted, with time until reset.
-        """
-        rate_limit: RateLimit = self.github.get_rate_limit().core
-        remaining = rate_limit.remaining
-        reset_time = rate_limit.reset.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-
-        # Log current rate limit status
-        logger.info(
-            {
-                "message": f"{check_name} API rate limit status",
-                "remaining_points": remaining,
-                "total_points": rate_limit.limit,
-                "reset_time": reset_time.isoformat(),
-                "minutes_to_reset": (reset_time - now).total_seconds() / 60,
-            }
-        )
-
-        # If less than 10% of rate limit remains, log a warning
-        if remaining < (rate_limit.limit * 0.1) and remaining > 0:
-            logger.warning(
-                {
-                    "message": "GitHub API rate limit running low",
-                    "remaining_points": remaining,
-                    "reset_time": reset_time.isoformat(),
-                }
-            )
-
-        # If rate limit is exhausted, log critical and wait for reset
-        if remaining == 0:
-            wait_time = (reset_time - now).total_seconds()
-            logger.critical(
-                {
-                    "message": "GitHub API rate limit exhausted",
-                    "reset_time": reset_time.isoformat(),
-                    "wait_time_seconds": wait_time,
-                }
-            )
-            raise Exception(
-                f"GitHub API rate limit exhausted. Resets in {wait_time/60:.1f} minutes"
-            )
-
-    def _work_activity_type(
-        self, title: str, body: str, labels: List[str]
-    ) -> PullRequestType:
-        """
-        Categorize pull request type based on metadata.
-
-        Args:
-            title (str): PR title
-            body (str): PR description
-            labels (List[str]): PR labels
+            prs_df (pd.DataFrame): DataFrame containing PR data
 
         Returns:
-            PullRequestType: Classified pull request type based on content and labels.
+            Dict[str, str]: Dictionary mapping PR numbers to their types
         """
-        title_lower = title.lower()
-        combined_text = f"{title_lower} {body.lower() if body else ''}"
-        labels_lower = [label.lower() for label in labels]
 
-        result = None
-        # Check labels first
-        for label in labels_lower:
-            if "feature" in label or "enhancement" in label:
-                result = PullRequestType.FEATURE
-            elif "bug" in label or "bugfix" in label:
-                result = PullRequestType.BUGFIX
-            elif "hotfix" in label or "critical" in label or "urgent" in label:
-                result = PullRequestType.HOTFIX
-            elif "test" in label or "testing" in label:
-                result = PullRequestType.TEST
-            elif "issue" in label:
-                result = PullRequestType.ISSUE
+        tasks = [
+            {
+                "pr_number": row["pr_number"],
+                "title": row["title"],
+                "body": row["body"] or "",
+                "labels": [label for label in row["labels"]],
+            }
+            for _, row in prs_df.iterrows()
+        ]
 
-        # Check title and body
-        if any(
-            keyword in combined_text for keyword in ["feature", "feat", "enhancement"]
-        ):
-            result = PullRequestType.FEATURE
-        elif any(keyword in combined_text for keyword in ["fix", "bug", "issue #"]):
-            result = PullRequestType.BUGFIX
-        elif any(
-            keyword in combined_text for keyword in ["hotfix", "critical", "urgent"]
-        ):
-            result = PullRequestType.HOTFIX
-        elif any(keyword in combined_text for keyword in ["test", "testing"]):
-            result = PullRequestType.TEST
-        elif any(
-            keyword in combined_text
-            for keyword in ["refactor", "refactoring", "refact"]
-        ):
-            result = PullRequestType.REFACTOR
-        elif "issue" in combined_text or "#" in title_lower:
-            result = PullRequestType.ISSUE
+        pr_types = await self.category_analyzer.categorize_all(tasks, feature_labels)
+        return pr_types
 
-        return result.value if result else PullRequestType.OTHER.value
-
-    async def analyze_repository(self, repo_data: RepositoryData) -> None:
+    async def analyze_repository(self, repo_data: RepositoryData) -> RepositoryMetrics:
         """
         Perform comprehensive analysis of a GitHub repository.
 
@@ -177,6 +106,9 @@ class GitHubAnalyzer:
             issues_df = pd.DataFrame([issue.model_dump() for issue in repo_data.issues])
 
             total_prs_count = prs_df.shape[0]
+            total_issues = issues_df.shape[0]
+            open_issues = len([i for i in repo_data.issues if i.state == "open"])
+
             if total_prs_count == 0:
                 logger.warning(
                     {
@@ -184,18 +116,19 @@ class GitHubAnalyzer:
                         "repository": repo_data.repository_name,
                     }
                 )
-                total_prs_count = 0
-                open_prs_count = 0
-                pr_interval_metrics = {}
-                top_contributors = []
-                all_contributors = set()
-
-            total_issues = issues_df.shape[0]
-            open_issues = (
-                issues_df[issues_df["state"] == "open"].shape[0]
-                if total_issues > 0
-                else 0
-            )
+                return RepositoryMetrics(
+                    repository_name=repo_data.repository_name,
+                    total_prs_count=0,
+                    open_prs_count=0,
+                    closed_prs_count=0,
+                    total_issues_count=total_issues,
+                    open_issues_count=len(
+                        [i for i in repo_data.issues if i.state == "open"]
+                    ),
+                    pr_interval_metrics={},
+                    top_contributors=[],
+                    contributors_count=0,
+                )
 
             if total_prs_count > 0:
                 open_prs_count = prs_df[prs_df["state"] == "open"].shape[0]
@@ -225,15 +158,13 @@ class GitHubAnalyzer:
                 top_n = max(1, int(len(activity_series) * 0.2))
                 top_contributors = activity_series.nlargest(top_n).index.tolist()
 
-                # add a column to the prs with the pr category type
-                prs_df["pr_type"] = prs_df.apply(
-                    lambda row: self._work_activity_type(
-                        row["title"],
-                        row["body"] or "",
-                        [label for label in row["labels"]],
-                    ),
-                    axis=1,
-                )
+                # Classify all PRs asynchronously
+                feature_labels = [pr_type.value for pr_type in PullRequestType]
+                pr_types = await self._classify_all_prs(prs_df, feature_labels)
+                df = pd.DataFrame(pr_types, columns=["pr_number", "pr_type"])
+                df["pr_number"] = df["pr_number"].astype(int)
+                prs_df = prs_df.merge(df, on="pr_number")
+                del df
 
                 # get the number for each self.timeframes
                 for interval, interval_date in self.timeframes.items():
@@ -314,6 +245,7 @@ class GitHubAnalyzer:
                     "message": "Repository analysis failed",
                     "repository": repo_data.repository_name,
                     "error": str(e),
+                    "error_line": e.__traceback__.tb_lineno,
                 }
             )
             raise e
